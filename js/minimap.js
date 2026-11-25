@@ -7,7 +7,7 @@ import { get } from './net.js';
 const RANK = { city: 0, town: 1, suburb: 2, village: 3, hamlet: 4 };
 
 // towns and villages: from the course data when it has them, otherwise asked of OpenStreetMap once and kept in this browser
-const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
 async function loadPlaces(id, real) {
   if (real.osm && real.osm.places) return real.osm.places;
   if (!real.zone) return [];                                           // only the German courses carry UTM coordinates

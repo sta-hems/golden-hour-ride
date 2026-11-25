@@ -24,23 +24,31 @@ const CSS = `
   #mixer input[type=range] { width: 100%; accent-color: #ffcf8f; }
   #mixer .v { text-align: right; opacity: .75; font-variant-numeric: tabular-nums; }
   #mixer .duck { display: flex; gap: 8px; margin-top: 10px; opacity: .9; }
+  .hpop #mixer { position: static; width: 280px; padding: 4px 8px 6px; background: none; border: 0; backdrop-filter: none; }
 `;
 const ROWS = [['master', 'All'], ['ride', 'Wind & tyres'], ['weather', 'Rain'], ['traffic', 'Traffic'], ['radio', 'Radio']];
-let panel = null;
-export function toggleMixer() {
-  if (panel) { panel.remove(); panel = null; return; }
-  if (!document.getElementById('mixer-css')) { const s = document.createElement('style'); s.id = 'mixer-css'; s.textContent = CSS; document.head.append(s); }
-  panel = document.createElement('div'); panel.id = 'mixer';
-  for (const ev of ['keydown', 'keyup']) panel.addEventListener(ev, e => e.stopPropagation());
-  panel.innerHTML = `<h3>Sound<button aria-label="Close">✕</button></h3>` +
-    ROWS.map(([k, name]) => `<label>${name}<input type="range" min="0" max="100" step="1" data-k="${k}"><span class="v"></span></label>`).join('') +
-    `<label class="duck"><input type="checkbox" id="mx-duck"> wind and tyres quieter while the radio plays</label>`;
-  panel.querySelector('h3 button').onclick = toggleMixer;
-  for (const inp of panel.querySelectorAll('input[type=range]')) {
-    const k = inp.dataset.k, out = inp.nextElementSibling;
-    inp.value = Math.round(sound[k] * 100); out.textContent = inp.value + ' %';
-    inp.oninput = () => { set(k, inp.value / 100); out.textContent = inp.value + ' %'; };
-  }
-  const d = panel.querySelector('#mx-duck'); d.checked = sound.duck; d.onchange = () => set('duck', d.checked);
-  document.body.append(panel);
+
+// The Sound button: the mixer opens while the pointer is over it; a click turns all sound off, and on again.
+export async function attachMixer(btn) {
+  const { hoverMenu } = await import('./hovermenu.js');
+  if (!document.getElementById('mixer-css')) { const st = document.createElement('style'); st.id = 'mixer-css'; st.textContent = CSS; document.head.append(st); }
+  let before = sound.master > 0 ? sound.master : DEFAULTS.master;
+  const label = () => { btn.textContent = sound.master > 0 ? 'Sound' : 'Sound: off'; btn.classList.toggle('on', sound.master > 0); };
+  const m = hoverMenu(btn, pop => {
+    const box = document.createElement('div'); box.id = 'mixer';
+    box.innerHTML = ROWS.map(([k, name]) => `<label>${name}<input type="range" min="0" max="100" step="1" data-k="${k}"><span class="v"></span></label>`).join('') +
+      `<label class="duck"><input type="checkbox" id="mx-duck"> wind and tyres quieter while the radio plays</label>`;
+    for (const inp of box.querySelectorAll('input[type=range]')) {
+      const k = inp.dataset.k, out = inp.nextElementSibling;
+      inp.value = Math.round(sound[k] * 100); out.textContent = inp.value + ' %';
+      inp.oninput = () => { set(k, inp.value / 100); out.textContent = inp.value + ' %'; };
+    }
+    const d = box.querySelector('#mx-duck'); d.checked = sound.duck; d.onchange = () => set('duck', d.checked);
+    pop.append(box);
+  });
+  btn.onclick = () => {
+    if (sound.master > 0) { before = sound.master; set('master', 0); } else set('master', before);
+    m.refresh();
+  };
+  onChange(label); label();
 }

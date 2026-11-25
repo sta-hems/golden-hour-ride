@@ -11,7 +11,7 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8791
-ALLOWED = {'www.hessenschau.de', 'www.tagesschau.de', 'feeds.bbci.co.uk', 'overpass-api.de', 'overpass.kumi.systems', 'maps.mail.ru',
+ALLOWED = {'www.hessenschau.de', 'www.tagesschau.de', 'feeds.bbci.co.uk', 'overpass-api.de', 'overpass.private.coffee', 'overpass.kumi.systems', 'maps.mail.ru',
            'api.hoehendaten.de', 'nominatim.openstreetmap.org', 'routing.openstreetmap.de'}
 
 

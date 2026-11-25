@@ -8,7 +8,7 @@ import { get, getJSON, sleep } from './net.js';
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
 const OSRM = 'https://routing.openstreetmap.de/routed-car/route/v1/driving/';
 const DGM_API = 'https://api.hoehendaten.de:14444/v1/rawtif';
-const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
 const TERRARIUM = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/';
 const STEP = 5, CELL = 10, MARGIN = 900, CORRIDOR = 1100;
 
@@ -88,12 +88,38 @@ async function zoneFor(lat, lon) {      // the survey offices use UTM zone 33 in
 
 /* ---------- OpenStreetMap ---------- */
 async function overpass(query, log, wait = 150000, rounds = 1) {
-  for (let round = 0; round < rounds; round++) for (const server of OVERPASS) {
+  // The public servers are often busy. Ask the first; if it has not answered after a few seconds, ask the next one
+  // as well, and so on: the first good answer wins and the others are called off.
+  const ask = async (server, signal) => {
+    const r = await get(server, { method: 'POST', body: new URLSearchParams({ data: query }), signal });
+    if (!r.ok) throw new Error(`${r.status}`);
+    const j = await r.json();
+    // a busy server can answer "200 OK" with a runtime error (timeout, out of memory) and no or only some elements
+    if (/error/i.test(j.remark || '')) throw new Error(j.remark);
+    return j.elements || [];
+  };
+  const STAGGER = Math.min(10000, wait / 3);
+  for (let round = 0; round < rounds; round++) {
+    const stop = new AbortController(), timer = setTimeout(() => stop.abort(), wait);
     try {
-      const r = await get(server, { method: 'POST', body: new URLSearchParams({ data: query }), signal: AbortSignal.timeout(wait) });   // a stuck server: move on to the next
-      const j = await r.json();
-      return j.elements || [];
-    } catch (err) { log(`map server ${new URL(server).host} did not answer, trying another…`); if (server === OVERPASS[OVERPASS.length - 1] && round + 1 < rounds) await sleep(30000); }
+      return await new Promise((ok, no) => {
+        let left = OVERPASS.length, next = 0, nudge = 0;
+        const start = () => {
+          if (next >= OVERPASS.length || stop.signal.aborted) return;
+          const server = OVERPASS[next++];
+          clearTimeout(nudge); nudge = setTimeout(start, STAGGER);
+          ask(server, stop.signal).then(ok, err => {
+            if (!stop.signal.aborted) log(`map server ${new URL(server).host} did not answer (${String(err.message || err).slice(0, 60)}), trying another…`);
+            if (--left === 0 || (next >= OVERPASS.length && left === 0)) no(err);
+            else if (!stop.signal.aborted) start();
+          });
+        };
+        stop.signal.addEventListener('abort', () => { clearTimeout(nudge); no(new Error('timed out')); });
+        start();
+      });
+    } catch (err) {
+      if (round + 1 < rounds) await sleep(30000);
+    } finally { clearTimeout(timer); stop.abort(); }
   }
   throw new Error('OpenStreetMap (Overpass) did not answer; try again in a few minutes');
 }
@@ -130,7 +156,13 @@ async function quickTerrain(minLat, minLon, maxLat, maxLon, zone, log) {
 /* ---------- the build ---------- */
 // quality 'quick': open terrain tiles, ready in a minute or less. quality 'survey': the 1 m state survey, a tile
 // every 3 seconds. A quick course is built again at survey quality in the background, under the same id.
-export async function buildCourse({ names, places: given, loop = true, name, id: keepId, quality = 'survey' }, log = () => {}, progress = () => {}) {
+// Bumped when the way the map is laid out changes; a route built with an older one is rebuilt in the background
+// on its next ride (2: houses up to 700 m from the road, footprints cut into boxes, buildings with courtyards;
+// 3: rebuilt along the routed line again, as 2's rebuild from the 15 m road took the route's own bends for side roads;
+// 4: each building says what kind it is, so towns and villages can be drawn differently; pitched roofs up to 22 m deep).
+export const MAP_VERSION = 4;
+
+export async function buildCourse({ names, places: given, loop = true, name, id: keepId, quality = 'survey', track, fallback }, log = () => {}, progress = () => {}) {
   const t0 = performance.now(), quick = quality === 'quick';
   let places = given;
   if (!places) {
@@ -141,9 +173,15 @@ export async function buildCourse({ names, places: given, loop = true, name, id:
   names = places.map(p => p.name || p.label);
   if (places.length < 2) throw new Error('give at least two places');
 
-  log('Routing along the roads…');
-  const r = await route(places, loop);
-  const ll = cutSpurs(r.pts);
+  // A route being rebuilt keeps its own routed line where it has one. Otherwise it is routed along the roads; the
+  // line has to follow the mapped roads closely, or their bends are taken for side roads. Only if the routing
+  // server is down does a rebuild fall back on the line smoothed through its stored road.
+  let ll = track;
+  if (!ll) {
+    log('Routing along the roads…');
+    try { ll = cutSpurs((await route(places, loop)).pts); }
+    catch (err) { if (!fallback) throw err; log(`  routing failed (${err.message}), keeping the stored line`); ll = fallback; }
+  }
   const zone = await zoneFor(places[0].lat, places[0].lon);
   const utm = ll.map(p => llToUtm(p[0], p[1], zone));
   const line = [utm[0]]; let carry = 0;               // resample every 5 m
@@ -208,7 +246,7 @@ export async function buildCourse({ names, places: given, loop = true, name, id:
   let ways = [], els = [], mapOk = false;
   {
     const qRoads = `[out:json][timeout:120];way["highway"]["highway"!~"^(footway|path|steps|pedestrian|bridleway|corridor|elevator|proposed|construction|platform)$"](${rbb});out tags geom;`;
-    const qMap = `[out:json][timeout:180];(way["building"](${bb});way["natural"="wood"](${bb});way["landuse"="forest"](${bb});relation["natural"="wood"](${bb});relation["landuse"="forest"](${bb});node["natural"="tree"](${bb});way["barrier"~"^(hedge|wall|retaining_wall)$"](${bb});node["place"~"^(city|town|village|suburb|hamlet)$"](${bb}););out geom;`;
+    const qMap = `[out:json][timeout:180];(way["building"](${bb});relation["building"](${bb});way["natural"="wood"](${bb});way["landuse"="forest"](${bb});relation["natural"="wood"](${bb});relation["landuse"="forest"](${bb});node["natural"="tree"](${bb});way["barrier"~"^(hedge|wall|retaining_wall)$"](${bb});node["place"~"^(city|town|village|suburb|hamlet)$"](${bb}););out geom;`;
     // both at once; the quick build waits 25 s at most, and the survey build in the background fetches them again
     const both = Promise.all([overpass(qRoads, log, quick ? 25000 : 150000, quick ? 1 : 2), overpass(qMap, log, quick ? 25000 : 150000, quick ? 1 : 2)]);
     try {
@@ -357,7 +395,26 @@ export async function buildCourse({ names, places: given, loop = true, name, id:
   log('Placing buildings, woods and hedges…');
   await sleep(0);
   const local = (lat, lon) => { const [E, N] = llToUtm(lat, lon, zone); return [E - cE, -(N - cN)]; };
-  const roadDist = (x, z) => routeNear(x + cE, cN - z)[0];
+  // routeNear only looks a bin or so around a point; further out, a 20 m distance map of the whole square answers
+  const DG = 20, DW = Math.ceil(size / DG) + 1, dmap = new Float32Array(DW * DW).fill(1e9);
+  for (const [E, N] of line) { const ix = Math.floor((E - cE + HALF) / DG), iz = Math.floor((cN - N + HALF) / DG); if (ix >= 0 && iz >= 0 && ix < DW && iz < DW) dmap[iz * DW + ix] = 0; }
+  for (let pass = 0; pass < 2; pass++) {            // two-pass chamfer distance
+    const step = pass ? -1 : 1, from = pass ? DW - 1 : 0, to = pass ? -1 : DW;
+    for (let iz = from; iz !== to; iz += step) for (let ix = from; ix !== to; ix += step) {
+      let v = dmap[iz * DW + ix];
+      for (const [dx, dz, w] of [[-step, 0, DG], [0, -step, DG], [-step, -step, DG * 1.414], [step, -step, DG * 1.414]]) {
+        const jx = ix + dx, jz = iz + dz;
+        if (jx >= 0 && jz >= 0 && jx < DW && jz < DW) v = Math.min(v, dmap[jz * DW + jx] + w);
+      }
+      dmap[iz * DW + ix] = v;
+    }
+  }
+  const roadDist = (x, z) => {
+    const d = routeNear(x + cE, cN - z)[0];
+    if (d < 1e8) return d;
+    const ix = Math.floor((x + HALF) / DG), iz = Math.floor((z + HALF) / DG);
+    return ix >= 0 && iz >= 0 && ix < DW && iz < DW ? Math.max(40, dmap[iz * DW + ix]) : 1e9;
+  };
   const inside = (x, z, m = 0) => Math.abs(x) < HALF - m && Math.abs(z) < HALF - m;
   const bestBox = pts => {
     let best = null;
@@ -370,6 +427,32 @@ export async function buildCourse({ names, places: given, loop = true, name, id:
     }
     return best;
   };
+  // A footprint as one or more boxes: a plain house is one box; an L, a U or a block round a courtyard is cut into
+  // strips across its length, each strip as long as the building is deep there, so no box covers the yard or the street.
+  const footprint = rings => {
+    const all = rings.flat(), b = bestBox(all); if (!b) return [];
+    let [, x, z, w, d, ang] = b;
+    const ux = Math.cos(ang), uz = Math.sin(ang);
+    const area = rings.reduce((sum, r, k) => { let a = 0; for (let i = 1; i < r.length; i++) a += r[i - 1][0] * r[i][1] - r[i][0] * r[i - 1][1]; return sum + (k ? -1 : 1) * Math.abs(a / 2); }, 0);
+    if (rings.length === 1 && area > 0.8 * w * d) return [[x, z, w, d, ang, true]];
+    const uv = rings.map(r => r.map(([px, pz]) => [px * ux + pz * uz, -px * uz + pz * ux]));
+    const us = uv.flat().map(p => p[0]), u0 = Math.min(...us), u1 = Math.max(...us), n = Math.max(1, Math.round((u1 - u0) / 7)), sw = (u1 - u0) / n;
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const uc = u0 + (i + 0.5) * sw, vs = [];
+      for (const r of uv) for (let k = 1; k < r.length; k++) {
+        const [a1, b1] = r[k - 1], [a2, b2] = r[k];
+        if ((a1 <= uc && uc < a2) || (a2 <= uc && uc < a1)) vs.push(b1 + (uc - a1) / (a2 - a1) * (b2 - b1));
+      }
+      vs.sort((p, q) => p - q);
+      for (let k = 0; k + 1 < vs.length; k += 2) {
+        const v1 = vs[k], v2 = vs[k + 1]; if (v2 - v1 < 2) continue;
+        const vc = (v1 + v2) / 2;
+        out.push([uc * ux - vc * uz, uc * uz + vc * ux, sw, v2 - v1, ang, false]);
+      }
+    }
+    return out;
+  };
   const height = t => {
     const hh = parseFloat(String(t.height || '').replace('m', '')); if (hh > 0) return Math.max(2.5, hh);
     const lv = parseFloat(t['building:levels']); if (lv > 0) return Math.max(2.5, lv * 3 + 1);
@@ -378,6 +461,26 @@ export async function buildCourse({ names, places: given, loop = true, name, id:
     return 6.5;
   };
   const buildings = [], woods = [], holes = [], trees = [], lines = [], towns = [];
+  // what kind of building, for how it is drawn: 0 a house, 1 a town house (flats, shops, offices),
+  // 2 a barn, shed, garage or works, 3 a church, 4 a farmhouse
+  const kindOf = t => {
+    const b = t.building;
+    if (b === 'church' || b === 'chapel' || b === 'cathedral' || t.amenity === 'place_of_worship') return 3;
+    if (['apartments', 'commercial', 'retail', 'office', 'terrace', 'hotel', 'civic', 'public', 'school', 'townhall', 'government', 'university', 'hospital', 'dormitory', 'kindergarten'].includes(b)) return 1;
+    if (['industrial', 'warehouse', 'barn', 'farm_auxiliary', 'garage', 'garages', 'shed', 'hut', 'carport', 'roof', 'greenhouse', 'stable', 'cowshed', 'agricultural', 'manufacture', 'service', 'storage_tank', 'hangar', 'sty', 'silo', 'transformer_tower'].includes(b)) return 2;
+    if (b === 'farm') return 4;
+    return 0;
+  };
+  const addBuilding = (rings, t) => {
+    const h = height(t), kind = kindOf(t);
+    for (let [x, z, w, d, ang, whole] of footprint(rings)) {
+      if (w < d) { [w, d] = [d, w]; ang += Math.PI / 2; }
+      if (!inside(x, z, 40) || w > 150 || w < 2 || d < 2) continue;
+      const rd = roadDist(x, z);
+      if (rd > 700 || rd < d / 2 + 4.5 || stubGap(x, z) < d / 2 + 1) continue;
+      buildings.push([+x.toFixed(1), +z.toFixed(1), +w.toFixed(1), +d.toFixed(1), +ang.toFixed(3), +h.toFixed(1), (!whole || h < 3.5 || d > 22) ? 0 : 1, kind]);
+    }
+  };
   for (const e of els) {
     const t = e.tags || {};
     if (e.type === 'node') {
@@ -387,15 +490,8 @@ export async function buildCourse({ names, places: given, loop = true, name, id:
     }
     if (e.type === 'way' && e.geometry) {
       const pts = e.geometry.map(p => local(p.lat, p.lon));
-      if (t.building && pts.length >= 4) {
-        const b = bestBox(pts); if (!b) continue;
-        let [, x, z, w, d, ang] = b; if (w < d) { [w, d] = [d, w]; ang += Math.PI / 2; }
-        if (!inside(x, z, 40) || w > 90 || w < 2 || d < 2) continue;
-        const rd = roadDist(x, z);
-        if (rd > 700 || rd < d / 2 + 4.5 || stubGap(x, z) < d / 2 + 1) continue;
-        const h = height(t);
-        buildings.push([+x.toFixed(1), +z.toFixed(1), +w.toFixed(1), +d.toFixed(1), +ang.toFixed(3), +h.toFixed(1), (h < 3.5 || d > 14) ? 0 : 1]);
-      } else if (t.natural === 'wood' || t.landuse === 'forest') { if (pts.length >= 4) woods.push(pts); }
+      if (t.building && pts.length >= 4) addBuilding([pts], t);
+      else if (t.natural === 'wood' || t.landuse === 'forest') { if (pts.length >= 4) woods.push(pts); }
       else if (['hedge', 'wall', 'retaining_wall'].includes(t.barrier)) {
         const kind = t.barrier === 'hedge' ? 0 : 1;
         for (let k = 1; k < pts.length; k++) {
@@ -406,6 +502,9 @@ export async function buildCourse({ names, places: given, loop = true, name, id:
           }
         }
       }
+    } else if (e.type === 'relation' && t.building) {
+      const rings = (e.members || []).filter(m => m.type === 'way' && m.geometry && m.geometry.length >= 4).sort((a, b) => (a.role === 'inner') - (b.role === 'inner')).map(m => m.geometry.map(p => local(p.lat, p.lon)));
+      if (rings.length) addBuilding(rings, t);
     } else if (e.type === 'relation' && (t.natural === 'wood' || t.landuse === 'forest')) {
       for (const m of e.members || []) if (m.type === 'way' && m.geometry && m.geometry.length >= 3) (m.role === 'inner' ? holes : woods).push(m.geometry.map(p => local(p.lat, p.lon)));
     }
@@ -437,8 +536,8 @@ export async function buildCourse({ names, places: given, loop = true, name, id:
   const km = +(line.length * STEP / 1000).toFixed(1);
   if (old) course.name = old.info.name;
   const saved = quality === 'survey' && !mapOk ? 'nomap' : quality;      // 'nomap': survey heights, but the map server failed; fetched again next time
-  await store.putCourse({ id, info: { id, name: old ? old.info.name : title, short: old ? old.info.short : title, km, climb: Math.round(climb), start: 0, drive: 'right', quality: saved },
-    places: names, resolved: places, loop, fav: old ? old.fav : false, created: old ? old.created : Date.now(), course, osm });
+  await store.putCourse({ id, info: { id, name: old ? old.info.name : title, short: old ? old.info.short : title, km, climb: Math.round(climb), start: 0, drive: 'right', quality: saved, mapVersion: MAP_VERSION },
+    places: names, resolved: places, loop, track: ll.map(p => [+p[0].toFixed(6), +p[1].toFixed(6)]), fav: old ? old.fav : false, created: old ? old.created : Date.now(), course, osm });
   log(`Done in ${Math.round((performance.now() - t0) / 1000)} s: ${km} km, ${Math.round(climb)} m of climbing.`);
   return { id, warnings, quality: saved };
 }

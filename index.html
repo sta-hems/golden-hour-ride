@@ -25,7 +25,6 @@
     border-radius: 999px; padding: 6px 12px; cursor: pointer; backdrop-filter: blur(6px); max-width: 230px; }
   #ctl select option { color: #000; }
   #ctl button.on { background: rgba(255,255,255,.3); border-color: #fff; }
-  #wx { display: flex; gap: 4px; }
   #hills { display: flex; gap: 4px; align-items: center; }
   #hills button { min-width: 30px; padding-left: 0; padding-right: 0; }
   #hval { min-width: 74px; text-align: center; }
@@ -40,13 +39,20 @@
   #log td:last-child { text-align: right; }
   #log .muted { opacity: .65; }
   #log button { margin-top: 12px; font: inherit; font-size: 11px; color: #fff; background: none; border: 1px solid rgba(255,255,255,.35); border-radius: 999px; padding: 4px 10px; cursor: pointer; }
-  body.clean #hud, body.clean #ctl, body.clean #log, body.clean #credit, body.clean #refine { display: none; }
+  body.clean #hud, body.clean #ctl, body.clean #log, body.clean #creditbox, body.clean #refine { display: none; }
   #refine { position: fixed; left: 30px; bottom: 96px; padding: 7px 12px; border-radius: 999px; font-size: 11px; letter-spacing: .06em;
     background: rgba(20,16,12,.55); border: 1px solid rgba(255,255,255,.3); backdrop-filter: blur(6px); display: flex; gap: 8px; align-items: center; }
   #refine button { font: inherit; color: #fff; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.4); border-radius: 999px; padding: 3px 10px; cursor: pointer; }
   #refine button.go { background: #c98a3b; border-color: #e7b06a; }
   body.clean { cursor: none; }
-  #credit { position: fixed; right: 14px; bottom: 10px; font-size: 10px; letter-spacing: .04em; opacity: .7; text-shadow: 0 1px 6px rgba(0,0,0,.7); max-width: 46vw; text-align: right; }
+  /* sources and licences: a small note in the corner that opens on a click */
+  #creditbox { position: fixed; right: 14px; bottom: 10px; font-size: 10px; letter-spacing: .04em; text-align: right; z-index: 5; }
+  #creditbox:has(#credit:empty) { display: none; }
+  #creditbox summary { list-style: none; cursor: pointer; opacity: .6; text-shadow: 0 1px 6px rgba(0,0,0,.7); user-select: none; }
+  #creditbox summary::-webkit-details-marker { display: none; }
+  #creditbox summary:hover, #creditbox[open] summary { opacity: .95; }
+  #creditbox[open] #credit { position: absolute; right: 0; bottom: 18px; width: max-content; max-width: min(46vw, 520px); text-align: left; line-height: 1.5;
+    padding: 10px 12px; border-radius: 10px; background: rgba(20,18,16,.82); backdrop-filter: blur(6px); }
 </style>
 <script type="importmap">
 { "imports": {
@@ -73,15 +79,16 @@
   <button id="voice" title="Say: rain, mist, overcast, sunny, skip, back, hide or show. For a smart trainer: easier or gear down, harder or gear up, flat, full">Voice: off</button>
   <select id="course" title="Choose a course: the invented valley or a real road built from survey data" aria-label="Course"></select>
   <button id="plan" title="Plan your own route: from one place, by others, and back. Germany only">Routes</button>
-  <select id="season" title="Season: spring blossom, summer, autumn colours, or winter snow" aria-label="Season"></select>
-  <span id="wx"><button data-w="snow">Snow</button><button data-w="golden" class="on">Golden</button><button data-w="overcast">Overcast</button><button data-w="rain">Rain</button><button data-w="mist">Mist</button><button data-w="starry">Starry</button></span>
+  <button id="season" title="Season: spring blossom, summer, autumn colours, or winter snow. Point at it to choose; a click goes to the next">Season: Summer</button>
+  <button id="houses" hidden title="Houses: all, only those further off (simple shapes look best from a distance), or none. Point at it to choose; a click goes to the next">Houses: all</button>
+  <button id="wx" title="Weather. Point at it to choose; a click goes to the next">Weather: Golden</button>
   <button id="bt">Connect trainer</button>
   <span id="hills" title="How much of each hill a smart trainer makes you feel. Turn it down if the climbs are too hard; 0 % is flat."><button id="hless" aria-label="Make hills easier">−</button><span id="hval">Hills 50 %</span><button id="hmore" aria-label="Make hills harder">+</button></span>
   <button id="clean" title="Hide everything on screen (H key, or say “hide”). Press H, click, or say “show” to bring it back">Hide info</button>
   <button id="logbtn" title="Distance you have ridden, kept in this browser">Log</button>
 </div>
 <div id="log" hidden></div>
-<div id="credit"></div>
+<details id="creditbox"><summary title="Sources and licences" onclick="setTimeout(() => this.blur())">© OpenStreetMap &amp; others ⓘ</summary><div id="credit"></div></details>
 <div id="loading">Building the valley…</div>
 
 <script type="module">
@@ -225,6 +232,8 @@ if (COURSE !== 'valley') {
   if (COURSE_INFO.mine) {                 // planned in this browser
     const rec = await (await import('./js/store.js')).getCourse(COURSE);
     window.RIDE_COURSES = window.RIDE_COURSES || {}; window.RIDE_COURSES[COURSE] = rec.course; rec.course.osm = rec.osm;
+    // no buildings at all (the map server failed quietly), or laid out by an older builder: fetch the map again
+    if ((rec.info.quality || 'survey') === 'survey' && (!rec.osm?.buildings?.length || (rec.info.mapVersion || 1) < 4)) COURSE_INFO.quality = 'nomap';   // (the first routes have no quality: built at survey)
   } else {
     await addScript(`assets/${COURSE}.js?v=${DATA}`);
     await addScript(`assets/${COURSE}_osm.js?v=${DATA}`).catch(() => {});          // buildings, woods and hedges are optional
@@ -246,7 +255,8 @@ for (const c of COURSES) {
   o.textContent = (c.fav ? '★ ' : '') + 'Course: ' + c.name + (c.km ? ` · ${c.km} km` : '') + (c.climb ? ` · ${c.climb} m up` : '');
   o.selected = c.id === COURSE; $('course').append(o);
 }
-$('sound').addEventListener('click', async () => (await import('./js/sound.js')).toggleMixer());
+(await import('./js/sound.js')).attachMixer($('sound'));      // the mixer opens on hover, a click mutes
+const { choiceMenu } = await import('./js/hovermenu.js');
 $('plan').addEventListener('click', async () => (await import('./js/planner.js')).togglePlanner({ current: COURSE }));
 $('course').addEventListener('change', e => {
   const q = new URLSearchParams(location.search); q.delete('course');
@@ -357,7 +367,14 @@ function terrainH(x, z) {
     h = (n.y - 0.6) * (1 - k) + b * k;
   }
   const s = nearSide(x, z);               // and the ground settles to meet the side roads
-  if (s) { const k = smooth(0.5, 9, s.d); h = (s.y - 0.35) * (1 - k) + h * k; }
+  if (s) {
+    const k = smooth(0.5, 9, s.d); h = (s.y - 0.35) * (1 - k) + h * k;
+    // where a side road meets or runs beside the route higher up, the route wins: the ground may not rise through its
+    // asphalt (the side road's own bank takes up the difference)
+    if (n && !onBridge[n.i]) h = Math.min(h, n.y - 0.6 + Math.max(0, n.d - 3.5) * 0.15);   // gently: the ground grid is 10 m, and a steep rise would tip over the road's edge
+  }
+  // and on a steep hillside the road runs in a cutting, its bank no steeper than one in four, for the same reason
+  if (n && !onBridge[n.i]) h = Math.min(h, n.y - 0.6 + Math.max(0, n.d - 3.5) * 0.25);
   return h;
 }
 const TS = real ? real.size : 3200, TG = real ? real.cells : 400, TC = TS / TG, TW = TG + 1;
@@ -639,20 +656,41 @@ if (bridgeRuns.length) {
 /* ---------- side roads: the first stretch of each road that meets the route ---------- */
 if (SIDE.length) {
   const gravelMap = imgTex(imgGravel, true);
-  const bufs = [[], []].map(() => ({ pos: [], uv: [], idx: [] }));
-  for (const [w, kind, f] of SIDE) {
+  const bufs = [[], []].map(() => ({ pos: [], uv: [], idx: [] })), bank = { pos: [], uv: [], idx: [] };   // bank: the earth under a way that rides above the ground
+  for (const [w, kind, f0] of SIDE) {
+    // The stretch starts where the side road leaves the route's centre line by 3.5 m; where it meets at a slant that
+    // leaves a wedge of open ground beside the asphalt. So it is carried on back to the centre line, under the route.
+    let f = f0;
+    if (f0.length >= 6) {
+      let tx = f0[0] - f0[3], tz = f0[2] - f0[5]; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
+      let ex = f0[0], ez = f0[2], d0 = nearRoad(ex, ez)?.d ?? 0;
+      for (let k = 0; k < 24; k++) { const nr = nearRoad(ex + tx * 0.5, ez + tz * 0.5); if (!nr || nr.d >= d0 || d0 < 0.3) break; ex += tx * 0.5; ez += tz * 0.5; d0 = nr.d; }
+      if (Math.hypot(ex - f0[0], ez - f0[2]) > 0.4) f = [ex, f0[1], ez, ...f0];
+    }
     const b = bufs[kind], n = f.length / 3, base = b.pos.length / 3;
     let run = 0;
     for (let i = 0; i < n; i++) {
       const j0 = Math.max(0, i - 1), j1 = Math.min(n - 1, i + 1);
       let tx = f[j1 * 3] - f[j0 * 3], tz = f[j1 * 3 + 2] - f[j0 * 3 + 2]; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
       if (i) run += Math.hypot(f[i * 3] - f[i * 3 - 3], f[i * 3 + 2] - f[i * 3 - 1]);
-      const x = f[i * 3], z = f[i * 3 + 2], nr = nearRoad(x, z), hw = w / 2 * (i === n - 1 ? 0.6 : 1);
-      let y = f[i * 3 + 1] - 0.04;
-      if (nr && nr.d < 4.2) y = Math.min(y, nr.y - 0.07);       // tucked under the route's own asphalt where they overlap
-      b.pos.push(x + tz * hw, y, z - tx * hw, x - tz * hw, y, z + tx * hw);      // left edge, then right, like the road strip
-      b.uv.push(...(kind ? [0, run / 3, w / 3, run / 3] : [0, run / 12, 1, run / 12]));
-      if (i) b.idx.push(base + 2 * i - 2, base + 2 * i - 1, base + 2 * i, base + 2 * i - 1, base + 2 * i + 1, base + 2 * i);
+      const x = f[i * 3], z = f[i * 3 + 2], hw = w / 2 * (i === n - 1 ? 0.6 : 1);
+      // The ground grid is 10 m, too coarse to follow a 3 to 5 m way across a hillside, so the way lies on the ground
+      // (a hand's breadth above it, at its edges and down the middle) instead of the other way round. Near the route
+      // it comes up to the route's height, and where the two overlap it is tucked under the route's asphalt.
+      for (const o of [1, 0, -1]) {
+        const px = x + tz * hw * o, pz = z - tx * hw * o, g = meshH(px, pz) + 0.1, nr = nearRoad(px, pz);
+        let y = g;
+        if (nr && !onBridge[nr.i]) {
+          const t = smooth(4.5, 11, nr.d);
+          y = Math.max(g, (nr.y - 0.07) * (1 - t) + g * t);
+          if (nr.d < 4.2) y = Math.min(y, nr.y - 0.07);
+        }
+        b.pos.push(px, y, pz);
+        if (o) { bank.pos.push(px, y - 0.02, pz, px, meshH(px, pz) - 0.3, pz); bank.uv.push(run / 3, 0, run / 3, 0.5); }
+      }
+      b.uv.push(...(kind ? [0, run / 3, w / 6, run / 3, w / 3, run / 3] : [0, run / 12, 0.5, run / 12, 1, run / 12]));
+      if (i) { const p0 = base + 3 * i - 3, p1 = base + 3 * i; b.idx.push(p0, p0 + 1, p1, p0 + 1, p1 + 1, p1, p0 + 1, p0 + 2, p1 + 1, p0 + 2, p1 + 2, p1 + 1); }
+      if (i) for (const e of [0, 2]) { const q1 = bank.pos.length / 3 - 4 + e, q0 = q1 - 4; bank.idx.push(q0, q0 + 1, q1, q0 + 1, q1 + 1, q1); }
     }
   }
   const mats = [new THREE.MeshStandardMaterial({ map: asphaltTex(false), roughnessMap: road.material.roughnessMap, roughness: 1, normalMap: asphaltNormal, normalScale: new THREE.Vector2(1.2, 1.2) }),
@@ -664,11 +702,17 @@ if (SIDE.length) {
     g.setIndex(b.idx); g.computeVertexNormals();
     const m = new THREE.Mesh(g, mats[kind]); m.receiveShadow = true; scene.add(m);
   });
-  st0.side = SIDE.length;
+  if (bank.idx.length) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(bank.pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(bank.uv, 2));
+    g.setIndex(bank.idx); g.computeVertexNormals();
+    const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: gravelMap, color: 0x8a7a60, roughness: 1, side: THREE.DoubleSide })); m.receiveShadow = true; scene.add(m);
+  }
+  st0.side = SIDE.length; st0.sideBufs = bufs;
 }
 
 /* ---------- grass along the verge (chunks, only the near ones are drawn) ---------- */
-const uTime = { value: 0 }, uCloud = { value: 1 }, uMote = { value: 1 }, uMeadow = { value: new THREE.Vector2() }, uSunAmt = { value: 1 };
+const uWinLit = { value: 0.4 }, uTime = { value: 0 }, uCloud = { value: 1 }, uMote = { value: 1 }, uMeadow = { value: new THREE.Vector2() }, uSunAmt = { value: 1 };
 function grassTex() {
   const [c, g] = canvas2d(256, 256);
   for (let i = 0; i < 36; i++) {
@@ -1104,20 +1148,126 @@ if (xl.p.length) {         // every Christmas light is one glowing point; bright
 if (real && real.osm.buildings.length) {
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new V3(0, 1, 0), sc = new V3(), ps = new V3(), col = new THREE.Color();
   const speck = (g, w, h, base, spread, n) => { for (let i = 0; i < n; i++) { const l = base + (rnd() - 0.5) * spread | 0; g.fillStyle = `rgba(${l},${l - 4},${l - 14},0.5)`; g.fillRect(rnd() * w, rnd() * h, 2 + rnd() * 5, 1 + rnd() * 2); } };
-  // one bay of wall with one window; repeated across each wall so windows are never cut in half
-  const [wc, wg] = canvas2d(128, 128);
-  wg.fillStyle = '#d9d2c2'; wg.fillRect(0, 0, 128, 128); speck(wg, 128, 128, 205, 50, 900);
-  wg.fillStyle = '#efebe0'; wg.fillRect(40, 30, 48, 64);
-  wg.fillStyle = '#27303a'; wg.fillRect(44, 34, 40, 56);
-  wg.fillStyle = '#efebe0'; wg.fillRect(63, 34, 2, 56); wg.fillRect(44, 61, 40, 2); wg.fillRect(36, 94, 56, 5);
-  const wallMap = new THREE.CanvasTexture(wc); wallMap.wrapS = wallMap.wrapT = THREE.RepeatWrapping; wallMap.colorSpace = THREE.SRGBColorSpace; wallMap.anisotropy = MAX_ANISO;
-  const wallMat = new THREE.MeshStandardMaterial({ map: wallMap, roughness: 0.95 });
-  wallMat.onBeforeCompile = s => {
-    s.vertexShader = s.vertexShader.replace('#include <uv_vertex>', `#include <uv_vertex>
-      #ifdef USE_INSTANCING
+  // Wall textures, each one bay of wall (3.4 m wide, one storey high) with one window; repeated across each wall so
+  // windows are never cut in half. The instance colour tints them: plaster in its colours, brick red or yellow.
+  const bay = draw => {
+    const [c, g] = canvas2d(128, 128); draw(g);
+    const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = MAX_ANISO; return t;
+  };
+  const windowAt = (g, frame, glass = '#27303a') => {
+    g.fillStyle = frame; g.fillRect(40, 30, 48, 64);
+    g.fillStyle = glass; g.fillRect(44, 34, 40, 56);
+    g.fillStyle = frame; g.fillRect(63, 34, 2, 56); g.fillRect(44, 61, 40, 2); g.fillRect(36, 94, 56, 5);
+  };
+  const stoneMap = bay(g => { g.fillStyle = '#d9d2c2'; g.fillRect(0, 0, 128, 128); speck(g, 128, 128, 205, 50, 900); windowAt(g, '#efebe0'); });
+  const wallMatOf = map => {
+    const m = new THREE.MeshStandardMaterial({ map, roughness: 0.95 });
+    m.onBeforeCompile = s => {
+      s.vertexShader = s.vertexShader.replace('#include <uv_vertex>', `#include <uv_vertex>
+        #ifdef USE_INSTANCING
+          float sx = length(instanceMatrix[0].xyz), sy = length(instanceMatrix[1].xyz), sz = length(instanceMatrix[2].xyz);
+          vMapUv = uv * vec2(max(1., floor((abs(normal.x) > 0.5 ? sz : sx) / 3.4 + 0.5)), max(1., floor(sy / 2.8 + 0.5)));
+        #endif`);
+    };
+    return m;
+  };
+  const WALLS = { stone: wallMatOf(stoneMap) };
+  // German houses: the facade is drawn by the shader, storey by storey and bay by bay (3.2 m), from a few numbers per
+  // house: the height of its plinth (on a slope), of a storey, its style, a seed, which face looks onto the road, and
+  // whether that face has a door or a gate, shutters, a shop. Windows are left out here and there, lit in the evening.
+  //   style 0 plaster, 1 brick, 2 half-timbered, 3 boards (barns, sheds), 4 church, 5 church tower
+  const facadeMat = new THREE.MeshStandardMaterial({ roughness: 0.92 });
+  facadeMat.onBeforeCompile = s => {
+    s.uniforms.uWinLit = uWinLit;
+    s.vertexShader = 'attribute vec4 aFac, aFac2; varying vec3 vFac; varying vec4 vInfo, vInfo2;\n' + s.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+      {
         float sx = length(instanceMatrix[0].xyz), sy = length(instanceMatrix[1].xyz), sz = length(instanceMatrix[2].xyz);
-        vMapUv = uv * vec2(max(1., floor((abs(normal.x) > 0.5 ? sz : sx) / 3.4 + 0.5)), max(1., floor(sy / 2.8 + 0.5)));
-      #endif`);
+        bool alongX = abs(normal.x) > 0.5;
+        float face = alongX ? (normal.x > 0. ? 0. : 1.) : (abs(normal.z) > 0.5 ? (normal.z > 0. ? 2. : 3.) : -1.);
+        float W = alongX ? sz : sx;
+        float u = alongX ? -position.z * sz * sign(normal.x) : position.x * sx * sign(normal.z);
+        vFac = vec3(u + W * 0.5, position.y * sy - aFac.x, W);
+        vInfo = vec4(aFac.yzw, face == aFac2.x ? 1. : 0.);
+        vInfo2 = vec4(aFac2.yzw, face);
+      }`);
+    s.fragmentShader = `uniform float uWinLit; varying vec3 vFac; varying vec4 vInfo, vInfo2;
+      float fh(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+      float rect(vec2 p, vec2 lo, vec2 hi, vec2 aa) { vec2 a = smoothstep(lo - aa, lo + aa, p) * (1. - smoothstep(hi - aa, hi + aa, p)); return a.x * a.y; }
+      ` + s.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+      vec3 facGlow = vec3(0.);
+      if (vInfo2.w >= 0.) {
+        vec3 base = diffuseColor.rgb, c = base;
+        float u = vFac.x, v = vFac.y, W = vFac.z, Hs = vInfo.x, style = vInfo.y, seed = vInfo.z, front = vInfo.w;
+        float doorK = vInfo2.x, shut = vInfo2.y, shop = vInfo2.z, face = vInfo2.w;
+        float n = max(1., floor(W / 3.2 + 0.3)), bw = W / n;
+        vec2 q = vec2(u / bw, v / Hs), aa = max(fwidth(q), vec2(1e-4)) * 0.7;
+        float bi = floor(q.x), si = floor(q.y); vec2 b = fract(q);
+        // the wall itself
+        if (style == 1.) {                                   // brick: courses 7.5 cm, bricks 24 cm, the mortar fades with distance
+          float row = floor(v / 0.075), col = floor((u + mod(row, 2.) * 0.12) / 0.24);
+          vec2 f = vec2(fract((u + mod(row, 2.) * 0.12) / 0.24), fract(v / 0.075));
+          float mort = (1. - rect(f, vec2(0.04, 0.12), vec2(0.96, 0.88), fwidth(f))) * (1. - smoothstep(0.01, 0.04, fwidth(v)));
+          c = base * vec3(0.62, 0.3, 0.22) * (0.85 + 0.3 * fh(vec3(row, col, seed)));
+          c = mix(c, vec3(0.68, 0.65, 0.6), mort * 0.7);
+        } else if (style == 3.) {                            // boards
+          float bd = floor(u / 0.3); c = base * (0.82 + 0.28 * fh(vec3(bd, seed, 3.)));
+          c *= 1. - 0.35 * (1. - smoothstep(0.0, 0.08, fract(u / 0.3))) * (1. - smoothstep(0.01, 0.05, fwidth(u)));
+        } else c = base * (0.95 + 0.05 * fh(vec3(floor(u * 0.7), floor(v * 0.7), seed)));
+        c *= 0.9 + 0.1 * smoothstep(0., 1.2, v);              // a little grime along the foot
+        float plinth = 1. - smoothstep(0.45 - aa.y * Hs, 0.45, v);
+        bool roomForDoor = front > 0.5 && si == 0. && bi == floor(fh(vec3(seed, 7., 1.)) * n);
+        // a window in this bay and storey? Fewer on the sides than on the front, few on barns and churches
+        float wantWin = style == 3. ? 0.15 : style >= 4. ? 0.75 : front > 0.5 ? 0.92 : 0.55;
+        bool win = fh(vec3(seed, face * 13. + bi, si)) < wantWin && v >= 0.;
+        vec2 wl = vec2(0.3, 0.32), wh = vec2(0.7, 0.86);
+        if (style == 4.) { wl = vec2(0.36, 0.18); wh = vec2(0.64, 0.86); }
+        if (style == 5.) { wl = vec2(0.36, 0.86); wh = vec2(0.64, 0.95); }
+        if (style == 3.) { wl = vec2(0.38, 0.6); wh = vec2(0.62, 0.85); }
+        bool shopHere = shop > 0.5 && front > 0.5 && si == 0.;
+        if (shopHere) { wl = vec2(0.06, 0.08); wh = vec2(0.94, 0.78); win = !roomForDoor; }
+        if (roomForDoor && doorK > 0.) win = false;
+        bool lit = fh(vec3(seed, face * 5. + bi, si + 40.)) < uWinLit * (shopHere ? 1. : 0.65);
+        // half-timbering: posts at the bay ends, rails at each floor and sill, braces beside the windows
+        if (style == 2. && v > 0.45) {
+          float beam = 0.;
+          beam = max(beam, 1. - rect(b, vec2(0.035, 0.05), vec2(0.965, 1.1), aa));
+          beam = max(beam, rect(b, vec2(-0.1, 0.27), vec2(1.1, 0.31), aa));
+          float bl = abs((b.x - 0.035) / 0.2 - b.y), br = abs((0.965 - b.x) / 0.2 - b.y);
+          if (b.x < 0.24) beam = max(beam, 1. - smoothstep(0.05, 0.05 + aa.y * 4., bl * 0.35));
+          if (b.x > 0.76) beam = max(beam, 1. - smoothstep(0.05, 0.05 + aa.y * 4., br * 0.35));
+          c = mix(c, vec3(0.2, 0.12, 0.07), beam);
+        }
+        // shutters
+        if (win && !shopHere && shut > 0. && style < 3.) {
+          vec3 sc = shut < 1.5 ? vec3(0.17, 0.3, 0.18) : shut < 2.5 ? vec3(0.42, 0.13, 0.1) : shut < 3.5 ? vec3(0.3, 0.19, 0.11) : vec3(0.27, 0.34, 0.42);
+          float sh = rect(b, vec2(wl.x - 0.15, wl.y), vec2(wl.x - 0.01, wh.y), aa) + rect(b, vec2(wh.x + 0.01, wl.y), vec2(wh.x + 0.15, wh.y), aa);
+          sc *= 0.85 + 0.15 * step(0.5, fract(b.y * 28.));
+          c = mix(c, sc, sh);
+        }
+        if (win) {
+          float fr = rect(b, wl - vec2(0.03, 0.03), wh + vec2(0.03, 0.03), aa), gl = rect(b, wl, wh, aa);
+          vec3 frame = style == 1. ? vec3(0.86, 0.84, 0.8) : vec3(0.93, 0.92, 0.89);
+          vec3 glass = mix(vec3(0.09, 0.11, 0.14), vec3(0.2, 0.24, 0.3), smoothstep(wl.y, wh.y, b.y));
+          float bars = shopHere ? 0. : max(rect(b, vec2((wl.x + wh.x) / 2. - 0.012, wl.y), vec2((wl.x + wh.x) / 2. + 0.012, wh.y), aa), rect(b, vec2(wl.x, mix(wl.y, wh.y, 0.62) - 0.012), vec2(wh.x, mix(wl.y, wh.y, 0.62) + 0.012), aa));
+          if (lit) { glass = shopHere ? vec3(1., 0.86, 0.62) : vec3(1., 0.72, 0.4) * (0.7 + 0.3 * fh(vec3(seed, bi, si + 9.))); facGlow = glass * gl * (1. - bars) * (shopHere ? 1.6 : 1.1) * smoothstep(0.2, 0.6, uWinLit); }
+          c = mix(c, frame, fr); c = mix(c, mix(glass, frame, bars), gl);
+        }
+        if (shopHere) {                                        // the shop sign over the window
+          vec3 sign = vec3(fh(vec3(seed, 1., 2.)), fh(vec3(seed, 2., 3.)), fh(vec3(seed, 3., 4.))) * 0.55 + 0.15;
+          c = mix(c, sign, rect(b, vec2(0.04, 0.83), vec2(0.96, 0.96), aa));
+        }
+        if (roomForDoor && doorK > 0.) {                       // the front door, or a gate into a barn or garage
+          vec2 dl = doorK > 1.5 ? vec2(0.08, 0.) : vec2(0.32, 0.), dh = doorK > 1.5 ? vec2(0.92, min(0.88, 3.4 / Hs)) : vec2(0.68, min(0.8, 2.25 / Hs));
+          vec3 wood = mix(vec3(0.32, 0.2, 0.12), vec3(0.5, 0.36, 0.22), fh(vec3(seed, 5., 5.)));
+          if (fh(vec3(seed, 6., 6.)) < 0.3) wood = vec3(0.16, 0.2, 0.17) + 0.1 * fh(vec3(seed, 8., 8.));
+          float dr = rect(b, dl, dh, aa), fr = rect(b, dl - vec2(0.03, 0.), dh + vec2(0.03, 0.03), aa);
+          wood *= 0.88 + 0.12 * step(0.5, fract((doorK > 1.5 ? b.x * 9. : b.y * 6.)));
+          c = mix(c, vec3(0.85, 0.84, 0.8), fr * (doorK > 1.5 ? 0. : 1.)); c = mix(c, wood, dr);
+        }
+        c = mix(c, base * vec3(0.5, 0.48, 0.46) + vec3(0.1), plinth);     // the plinth
+        if (v < 0.) c = mix(vec3(0.42, 0.4, 0.38), base * 0.5, 0.3);
+        diffuseColor.rgb = c;
+      }`).replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance += facGlow * 2.5;');
   };
   const hip = new THREE.BufferGeometry();          // a hipped roof: four slopes up to a short ridge
   hip.setAttribute('position', new THREE.Float32BufferAttribute([
@@ -1127,26 +1277,175 @@ if (real && real.osm.buildings.length) {
   hip.computeVertexNormals();
   const B = real.osm.buildings, box = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
   const roofMat = new THREE.MeshStandardMaterial({ roughness: 0.8 });
-  const walls = new THREE.InstancedMesh(box, wallMat, B.length), pitched = new THREE.InstancedMesh(hip, roofMat, B.length), flat = new THREE.InstancedMesh(box, roofMat, B.length);
-  let np = 0, nf = 0, nw = 0;
   const SHOW_TOWN = !COURSE_INFO.vintage;     // 19th-century Leckhampton: a village among fields, so the modern town is left out
-  const KEEP_OUT = 150;        // simple house shapes only hold up at a distance, so none are drawn near the road
+  // Simple house shapes hold up best at a distance; the rider chooses whether the ones by the road are drawn too
+  // (Houses button). Either way no corner may reach onto the road or a side road.
+  const KEEP_OUT = 150, HOUSES_KEY = 'golden-hour-ride-houses';
   const farFromRoad = (x, z) => { for (let k = 0; k < N; k += 8) { const ex = P[k].x - x, ez = P[k].z - z; if (ex * ex + ez * ez < KEEP_OUT * KEEP_OUT) return false; } return true; };
-  B.forEach(([x, z, w, d, ang, h, roof]) => {
-    if (!SHOW_TOWN || !farFromRoad(x, z)) return;
-    const i = nw++;
-    const c = Math.cos(ang), sn = Math.sin(ang);
-    let lo = 1e9, hi = -1e9;
-    for (const [u, v] of [[0, 0], [w / 2, d / 2], [w / 2, -d / 2], [-w / 2, d / 2], [-w / 2, -d / 2]]) { const y = meshH(x + u * c - v * sn, z + u * sn + v * c); lo = Math.min(lo, y); hi = Math.max(hi, y); }
-    q.setFromAxisAngle(up, -ang);
-    walls.setMatrixAt(i, m4.compose(ps.set(x, lo - 0.4, z), q, sc.set(w, h + hi - lo + 0.4, d)));
-    walls.setColorAt(i, col.setHSL(0.1, 0.2, 0.56 + rnd() * 0.08));                // one muted stone, so the town reads as a single mass
-    const slate = col.setHSL(0.6, 0.06, 0.2 + rnd() * 0.06);
-    if (roof) { pitched.setMatrixAt(np, m4.compose(ps.set(x, hi + h, z), q, sc.set(w + 0.8, Math.min(3.4, d * 0.34), d + 0.8))); pitched.setColorAt(np++, slate); }
-    else { flat.setMatrixAt(nf, m4.compose(ps.set(x, hi + h, z), q, sc.set(w + 0.3, 0.3, d + 0.3))); flat.setColorAt(nf++, slate); }
-  });
-  walls.count = nw; pitched.count = np; flat.count = nf;
-  for (const m of [walls, pitched, flat]) { m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; scene.add(m); }
+  const clearOfRoads = (x, z, w, d, c, sn) => {
+    for (const [u, v] of [[0, 0], [w / 2, d / 2], [w / 2, -d / 2], [-w / 2, d / 2], [-w / 2, -d / 2], [w / 2, 0], [-w / 2, 0], [0, d / 2], [0, -d / 2]]) {
+      const px = x + u * c - v * sn, pz = z + u * sn + v * c, r = nearRoad(px, pz), sd = nearSide(px, pz);
+      if ((r && r.d < 6) || (sd && sd.d < 1.5)) return false;
+    }
+    return true;
+  };
+  const close = [], far = [];
+  if (SHOW_TOWN) for (const b of B) {
+    const [x, z, w, d, ang] = b, c = Math.cos(ang), sn = Math.sin(ang);
+    if (!clearOfRoads(x, z, w, d, c, sn)) continue;
+    (farFromRoad(x, z) ? far : close).push(b);
+  }
+  // How town-like the ground round each house is: many houses close by, or a town or city on the map nearby,
+  // make tall town houses with brick or coloured plaster; a few houses make a village of farmhouses and
+  // half-timbering with red tile roofs. (The English courses keep their one muted stone and slate.)
+  const GERMAN = COURSE_INFO.drive !== 'left';
+  const urban = new Map();
+  if (GERMAN) {
+    const UB = 50, ub = new Map(), key = (x, z) => Math.floor(x / UB) * 65536 + Math.floor(z / UB);
+    for (const b of B) { const k = key(b[0], b[1]); (ub.get(k) || ub.set(k, []).get(k)).push(b); }
+    // the nearest place on the map caps it: a village's dense core is still a village
+    const CAP = { city: 1, suburb: 0.9, town: 0.75, village: 0.3, hamlet: 0.15 }, places = (real.osm.places || []).filter(p => CAP[p[3]]);
+    for (const b of B) {
+      let n = 0; const cx = Math.floor(b[0] / UB), cz = Math.floor(b[1] / UB);
+      for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) for (const o of ub.get((cx + dx) * 65536 + cz + dz) || []) if (Math.hypot(o[0] - b[0], o[1] - b[1]) < 90) n++;
+      let cap = 0.4, best = 2500;
+      for (const p of places) { const dd = Math.hypot(p[0] - b[0], p[1] - b[1]); if (dd < best) { best = dd; cap = CAP[p[3]]; } }
+      const u = cap * smooth(10, 50, n);
+      urban.set(b, u);
+    }
+  }
+  const pick = a => a[Math.floor(rnd() * a.length)];
+  const PLASTER = ['#f6f2ea', '#f3ead6', '#f1e2bc', '#ecd3bd', '#e3e3dc', '#efe0c4', '#f4f4f0', '#e6d9bd'];
+  const PLASTER_TOWN = ['#f2e6cf', '#ecd29c', '#e3bba2', '#d6dde3', '#e6c3bb', '#d9d6c6', '#f4efe6', '#e8d8a8', '#cfd9c8'];
+  const BRICK = ['#ffffff', '#f3ddcf', '#e9d2a6', '#d7c7c0'];
+  const SHED = ['#d8d4cc', '#bfc4c6', '#c9b49a', '#9f8a70', '#d3cbbb'];
+  const TILE = ['#9a3b2a', '#a5502f', '#8a3324', '#6b3a2a', '#b05c3a'], DARK = ['#3a3c40', '#46484c', '#2f3135', '#55504c'];
+  const CHIMNEY = ['#7a3b2c', '#6a3326', '#4a4644', '#8a8580'];
+  const gable = new THREE.BufferGeometry();        // a gable roof: two slopes up to a ridge along the house's length
+  gable.setAttribute('position', new THREE.Float32BufferAttribute([
+    -.5, 0, -.5, .5, 0, -.5, .5, 1, 0,   -.5, 0, -.5, .5, 1, 0, -.5, 1, 0,
+    .5, 0, .5, -.5, 0, .5, -.5, 1, 0,    .5, 0, .5, -.5, 1, 0, .5, 1, 0], 3));
+  gable.computeVertexNormals();
+  const ends = new THREE.BufferGeometry();         // and the wall up into the gable at each end
+  ends.setAttribute('position', new THREE.Float32BufferAttribute([-.5, 0, .5, -.5, 0, -.5, -.5, 1, 0,   .5, 0, -.5, .5, 0, .5, .5, 1, 0], 3));
+  ends.computeVertexNormals();
+  const spire = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1).rotateY(Math.PI / 4).translate(0, 0.5, 0);
+  const endMat = new THREE.MeshStandardMaterial({ roughness: 0.95, side: THREE.DoubleSide }), tileMat = new THREE.MeshStandardMaterial({ roughness: 0.85, side: THREE.DoubleSide });
+  // which face of a house looks onto the nearest road or side road (0 +x, 1 -x, 2 +z, 3 -z, as the shader numbers them),
+  // and how far that road is
+  const facing = (x, z, c, sn) => {
+    let rx = 0, rz = 0, dist = 1e9;
+    const r = nearRoad(x, z); if (r) { rx = P[r.i].x - x; rz = P[r.i].z - z; dist = r.d; }
+    const sd = nearSide(x, z);
+    if (sd && sd.d < dist) {           // nearSide gives no point, so look for the side road's nearest point
+      const cx = Math.floor(x / SCELL), cz = Math.floor(z / SCELL); let best = 1e9;
+      for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) for (const [px, , pz] of sideHash.get(skey(cx + dx, cz + dz)) || []) { const e = Math.hypot(px - x, pz - z); if (e < best) { best = e; rx = px - x; rz = pz - z; } }
+      dist = sd.d;
+    }
+    if (dist > 1e8) return [rnd() < 0.5 ? 2 : 3, 1e9];
+    const a = rx * c + rz * sn, b = -rx * sn + rz * c;
+    return [Math.abs(a) > Math.abs(b) ? (a > 0 ? 0 : 1) : (b > 0 ? 2 : 3), dist];
+  };
+  const town = list => {
+    const n = Math.max(1, list.length), meshes = [];
+    const inst = (geo, mat, count = n) => { const m = new THREE.InstancedMesh(geo, mat, count); m.count = 0; meshes.push(m); return m; };
+    const add = (m, x, y, z, sx, sy, sz, colour) => { m.setMatrixAt(m.count, m4.compose(ps.set(x, y, z), q, sc.set(sx, sy, sz))); m.setColorAt(m.count++, col.set(colour).offsetHSL(0, 0, (rnd() - 0.5) * 0.05)); return m.count - 1; };
+    const stone = inst(box, WALLS.stone);
+    const churches = list.filter(b => b[7] === 3).length, fgeo = box.clone();
+    const facAttr = new THREE.InstancedBufferAttribute(new Float32Array((n + churches) * 4), 4), fac2Attr = new THREE.InstancedBufferAttribute(new Float32Array((n + churches) * 4), 4);
+    fgeo.setAttribute('aFac', facAttr); fgeo.setAttribute('aFac2', fac2Attr);
+    const walls = inst(fgeo, facadeMat, n + churches);
+    const wall = (x, y, z, w, hh, d, colour, plinth, storey, style, front, door, shut, shop) => {
+      const i = add(walls, x, y, z, w, hh, d, colour);
+      facAttr.array.set([plinth, storey, style, rnd() * 100], i * 4); fac2Attr.array.set([front, door, shut, shop], i * 4);
+    };
+    const pitched = inst(hip, roofMat), flat = inst(box, roofMat), gables = inst(gable, tileMat), gableEnds = inst(ends, endMat), chimneys = inst(box, roofMat, n * 2);
+    const spires = inst(spire, tileMat, Math.max(1, churches));
+    for (const b of list) {
+      let [x, z, w, d, ang, h, roof, kind = 0] = b;
+      const c = Math.cos(ang), sn = Math.sin(ang);
+      let lo = 1e9, hi = -1e9;
+      for (const [u, v] of [[0, 0], [w / 2, d / 2], [w / 2, -d / 2], [-w / 2, d / 2], [-w / 2, -d / 2]]) { const y = meshH(x + u * c - v * sn, z + u * sn + v * c); lo = Math.min(lo, y); hi = Math.max(hi, y); }
+      q.setFromAxisAngle(up, -ang);
+      if (!GERMAN) {                        // one muted stone, so the town reads as a single mass
+        add(stone, x, lo - 0.4, z, w, h + hi - lo + 0.4, d, col.setHSL(0.1, 0.2, 0.56 + rnd() * 0.08).getHex());
+        const slate = col.setHSL(0.6, 0.06, 0.2 + rnd() * 0.06).getHex();
+        if (roof) add(pitched, x, hi + h, z, w + 0.8, Math.min(3.4, d * 0.34), d + 0.8, slate); else add(flat, x, hi + h, z, w + 0.3, 0.3, d + 0.3, slate);
+        continue;
+      }
+      const u = urban.get(b) || 0, small = w * d < 30 && h < 4, tagged = h !== 6.5 && kind !== 3;
+      if (kind === 0 && !small && rnd() < smooth(0.3, 0.85, u) * 0.9) kind = 1;     // in town, most houses are town houses
+      if (kind === 0 && small) kind = 2;                                                // garages and garden sheds
+      const [front, toRoad] = facing(x, z, c, sn);
+      // storeys: as the map says, or two (now and then three) in the country and three to five in town
+      let storey = 2.8, style = 0, colour, roofCol, pitch, door = 1, shut = 0, shop = 0;
+      if (kind === 2) {
+        style = 3; colour = pick(SHED); roofCol = pick([...DARK, '#7a3a2c', '#8c8f90']); pitch = 0.5; door = 2;
+        if (!tagged) h = small ? 2.6 : 4.5 + rnd() * 2.5;
+        storey = h;
+      } else if (kind === 3) {
+        style = 4; colour = pick(['#f4f1ea', '#e9dcc0', '#d9c6a4']); roofCol = pick(DARK); pitch = 1.3; roof = d < 26 ? 1 : roof; storey = h;
+      } else if (kind === 1) {
+        const town = u > 0.4;
+        let floors = tagged ? Math.max(1, Math.round((h - 0.5) / 3)) : town ? 3 + Math.min(2, Math.floor(rnd() * (1.5 + u * 2))) : 2 + (rnd() < 0.4 ? 1 : 0);
+        storey = 3; h = tagged ? h : floors * storey + 0.3; storey = (h - 0.3) / floors;
+        if (rnd() < 0.25 * u + 0.05) { style = 1; colour = pick(BRICK); } else colour = pick(PLASTER_TOWN);
+        roofCol = rnd() < 0.7 ? pick(DARK) : pick(TILE); pitch = 0.9 + rnd() * 0.3;
+        shop = town && toRoad < 45 && rnd() < 0.7 ? 1 : 0;
+        shut = rnd() < 0.1 ? 1 + Math.floor(rnd() * 4) : 0;
+        if (!town && roof === 0 && d <= 22) roof = 1;
+      } else {
+        const floors = tagged ? Math.max(1, Math.round((h - 0.5) / 2.8)) : rnd() < 0.72 ? 2 : 3;
+        h = tagged ? h : floors * storey + 0.3; storey = (h - 0.3) / floors;
+        style = h <= 9 && rnd() < (kind === 4 ? 0.5 : 0.28) ? 2 : 0;
+        colour = style === 2 ? pick(['#ffffff', '#f6efe2', '#f2e7d0']) : pick(PLASTER);
+        roofCol = rnd() < 0.72 ? pick(TILE) : pick(DARK); pitch = 0.95 + rnd() * 0.35;          // steep, as the country builds them
+        shut = style === 0 && rnd() < 0.45 ? 1 + Math.floor(rnd() * 4) : 0;
+        if (kind === 4 && rnd() < 0.4) door = 2;                                               // a farmhouse with a gate into the yard
+        if (roof === 0 && d <= 24) roof = 1;                                                   // a pitched roof, also on the parts of a bigger house
+      }
+      if (toRoad > 80 && kind !== 3) door = rnd() < 0.5 ? door : 0;
+      wall(x, lo - 0.4, z, w, h + hi - lo + 0.4, d, colour, hi - lo + 0.4, storey, style, front, door, shut, shop);
+      st0.shops = (st0.shops || 0) + shop; if (shop) (st0.shopAt = st0.shopAt || []).push([x, z]); st0.styles = st0.styles || [0, 0, 0, 0, 0]; st0.styles[style]++;
+      const top = hi + h;
+      if (!roof) { add(flat, x, top, z, w + 0.3, 0.3, d + 0.3, pick(DARK)); }
+      else if (kind !== 3 && kind !== 2 && rnd() < 0.12) add(pitched, x, top, z, w + 0.8, Math.min(4.5, d * 0.45), d + 0.8, roofCol);   // now and then a hipped roof
+      else {
+        const rh = Math.min(kind === 3 ? 12 : 7.5, d / 2 * pitch), slope = rh / (d / 2);
+        add(gableEnds, x, top, z, w, rh, d, colour);
+        add(gables, x, top - 0.45 * slope, z, w + 0.6, rh + 0.45 * slope, d + 0.9, roofCol);
+        if (kind === 0 || kind === 1 || kind === 4) for (let k = 0, nk = rnd() < 0.12 ? 0 : kind === 1 && w > 14 ? 2 : 1; k < nk; k++) {   // chimneys, near the ridge
+          const ox = (nk === 2 ? (k ? 0.3 : -0.3) : (rnd() - 0.5) * 0.6) * w, oz = (rnd() < 0.5 ? -1 : 1) * d * 0.12, ry = top + rh * (1 - Math.abs(oz) / (d / 2));
+          add(chimneys, x + ox * c - oz * sn, ry - 0.6, z + ox * sn + oz * c, 0.6, 1.9, 0.6, pick(CHIMNEY));
+        }
+      }
+      if (kind === 3) {                     // a church tower at one end, with a spire
+        const ts = Math.max(3, Math.min(7, d * 0.6, w * 0.3)), th = Math.min(45, h + Math.min(12, d / 2 * pitch) + 6 + w * 0.25), off = w / 2 - ts / 2;
+        const tx = x - off * c, tz = z - off * sn;
+        wall(tx, lo - 0.4, tz, ts, th + hi - lo + 0.4, ts, colour, hi - lo + 0.4, th, 5, front, 0, 0, 0);
+        add(spires, tx, hi + th, tz, ts + 0.4, ts * 2.2, ts + 0.4, rnd() < 0.3 ? '#6f9a86' : pick(DARK));      // some are copper, gone green
+      }
+    }
+    facAttr.needsUpdate = fac2Attr.needsUpdate = true;
+    const g = new THREE.Group();
+    for (const m of meshes) if (m.count) { m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; g.add(m); } else m.dispose();
+    scene.add(g); return g;
+  };
+  const distant = town(far), byRoad = close.length ? town(close) : null;
+  if (far.length || close.length) {
+    // all, distant only, or none; the German courses go through towns: all by default
+    const btn = $('houses'), MODES = [['all', 'All'], ['distant', 'Distant only'], ['off', 'Off']];
+    let mode = localStorage.getItem(HOUSES_KEY) || (COURSE_INFO.drive !== 'left' ? 'all' : 'distant');
+    const apply = m => {
+      mode = MODES.some(([k]) => k === m) ? m : 'all';
+      distant.visible = mode !== 'off'; if (byRoad) byRoad.visible = mode === 'all';
+      btn.textContent = 'Houses: ' + MODES.find(([k]) => k === mode)[1].toLowerCase();
+      try { localStorage.setItem(HOUSES_KEY, mode); } catch {}
+    };
+    btn.hidden = false; apply(mode);
+    choiceMenu(btn, () => MODES.map(([id, label]) => ({ id, label, on: id === mode })), apply);
+    btn.onclick = () => apply(MODES[(MODES.findIndex(([k]) => k === mode) + 1) % MODES.length][0]);
+  }
 
   // hedges and dry-stone walls, laid in short pieces that follow the ground
   const [hc, hg] = canvas2d(64, 64); hg.fillStyle = '#263a17'; hg.fillRect(0, 0, 64, 64);
@@ -1341,8 +1640,11 @@ const WEATHER = {
 WEATHER.snow = { sun: 5, sunCol: [1, 0.64, 0.46], hemi: 2.5, fog: 0.0015, fogCol: [hz[0] * 0.8, hz[1] * 0.86, hz[2] * 1.05], dome: 0.4, domeH: hz, domeZ: grey(0.26, 0.33, 0.62),
                  cloud: 0.8, cLit: grey(1.7, 1.2, 1.05), cDark: grey(0.34, 0.4, 0.62), mote: 0, rays: 0.8, rain: 0, rough: 0.5, tint: 0.62, ground: 1, paint: 0, expo: 0.38, snow: 1 };
 for (const k in WEATHER) WEATHER[k].snow ??= 0;
+// how many windows are lit: a few in the golden hour, most under the stars
+for (const [k, v] of Object.entries({ golden: 0.4, overcast: 0.3, rain: 0.55, mist: 0.5, starry: 1, snow: 0.6 })) if (WEATHER[k]) WEATHER[k].lit ??= v;
+for (const k in WEATHER) WEATHER[k].lit ??= 0.3;
 const wx = JSON.parse(JSON.stringify(WEATHER.golden));
-let wxTarget = WEATHER.golden;
+let wxTarget = WEATHER.golden, wxName = 'golden';
 function setWeather(name, instant) {
   if (!WEATHER[name]) return;
   wxTarget = WEATHER[name];
@@ -1355,7 +1657,7 @@ function setWeather(name, instant) {
   scene.add(sky, dome);
   envRT.dispose(); envRT = rt; scene.environment = rt.texture;
   u.uA.value = was[0]; u.uH.value.copy(was[1]); u.uZ.value.copy(was[2]); u.uPaint.value = was[3];
-  document.querySelectorAll('#wx button').forEach(b => b.classList.toggle('on', b.dataset.w === name));
+  wxName = name; $('wx').textContent = 'Weather: ' + (WX_LABEL[name] || name);
 }
 function stepWeather(dt) {
   const k = Math.min(1, dt * (SCENERY !== null ? 0.07 : 1.2));
@@ -1369,7 +1671,7 @@ function stepWeather(dt) {
   scene.fog.density = wx.fog; scene.fog.color.fromArray(wx.fogCol);
   const u = dome.material.uniforms; u.uA.value = wx.dome; u.uH.value.fromArray(wx.domeH); u.uZ.value.fromArray(wx.domeZ); u.uPaint.value = wx.paint;
   dome.position.copy(camera.position);
-  uCloud.value = wx.cloud; uMote.value = wx.mote; uLid.value = wx.dome; uSunAmt.value = Math.min(1, wx.sun / 10);
+  uCloud.value = wx.cloud; uMote.value = wx.mote; uLid.value = wx.dome; uSunAmt.value = Math.min(1, wx.sun / 10); uWinLit.value = wx.lit;
   uCloudLit.value.fromArray(wx.cLit); uCloudDark.value.fromArray(wx.cDark); uCloudHaze.value.fromArray(wx.fogCol);
   terrainMat.color.setScalar(wx.ground);                                          // wet ground is darker
   rainU.uRain.value = wx.rain; rainMesh.visible = wx.rain > 0.01;
@@ -1377,11 +1679,14 @@ function stepWeather(dt) {
   road.material.roughness = wx.rough; road.material.color.setScalar(wx.tint);     // wet tarmac: darker and glossier
   renderer.toneMappingExposure = wx.expo;
 }
-document.querySelectorAll('#wx button').forEach(b => b.addEventListener('click', () => setWeather(b.dataset.w)));
+// the weathers on offer: snow only at Christmas, the starry night only in the lab
+const WX_LABEL = { snow: 'Snow', golden: 'Golden', overcast: 'Overcast', rain: 'Rain', mist: 'Mist', starry: 'Starry' };
+const wxList = () => Object.keys(WX_LABEL).filter(k => WEATHER[k] && (k !== 'starry' || LAB) && (k !== 'snow' || XMAS));
+choiceMenu($('wx'), () => wxList().map(id => ({ id, label: WX_LABEL[id], on: id === wxName })), id => setWeather(id));
+$('wx').addEventListener('click', () => { const l = wxList(); setWeather(l[(l.indexOf(wxName) + 1) % l.length]); });
 // Starry is still being worked on: it only appears on the local copy, not the hosted site.
 const LAB = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || location.protocol === 'file:';
-if (!LAB) document.querySelector('#wx [data-w="starry"]')?.remove();
-if (!XMAS) document.querySelector('#wx [data-w="snow"]')?.remove(); else setWeather('snow', true);
+if (XMAS) setWeather('snow', true);
 addEventListener('keydown', e => { const n = ['golden', 'overcast', 'rain', 'mist', LAB && 'starry'][+e.key - 1]; if (n) setWeather(n); });
 
 /* ---------- cockpit ---------- */
@@ -1513,6 +1818,9 @@ try { resume = JSON.parse(sessionStorage.getItem(RESUME_KEY) || 'null'); session
 if (resume && (resume.course !== COURSE || Date.now() - resume.t > 120000)) resume = null;
 if (resume) { Object.assign(st, { s: resume.s, dist: resume.dist, target: resume.target, power: resume.target, v: resume.v || 6 }); $('pwr').value = resume.target; }
 window.ride = st; st.haze = hazeCol; st.built = st0;
+st.probe = (x, z) => { const r = nearRoad(x, z), sd = nearSide(x, z); return { mesh: meshH(x, z), road: r && { d: r.d, y: r.y, i: r.i }, side: sd && { d: sd.d, y: sd.y } }; };   // for checking: ground and road heights at a point
+st.groundAt = (x, z) => meshH(x, z);
+st.pose = () => { const o = at(st.s, mkPose()); return [o.p.x, o.p.y, o.p.z, o.t.x, o.t.z]; };
 st.goNear = (x, z) => { let b = 0, bd = 1e12; for (let i = 0; i < N; i++) { const d = (P[i].x - x) ** 2 + (P[i].z - z) ** 2; if (d < bd) { bd = d; b = i; } } st.s = Math.max(0, b * LEN / N - 60); return Math.round(Math.sqrt(bd)); };   // for checking: ride to the road nearest a point
 st.weather = (n, i) => setWeather(n, i);
 const skip = m => { st.s = (((st.s + m) % LEN) + LEN) % LEN; };
@@ -1808,11 +2116,13 @@ function setSeason(name) {
     }
     seasonal.fol.instanceColor.needsUpdate = true;
   }
-  $('season').value = name in SEASONS ? name : 'summer';
-  try { localStorage.setItem(SEASON_KEY, $('season').value); } catch {}
+  season = name in SEASONS ? name : 'summer';
+  $('season').textContent = 'Season: ' + SEASONS[season].label;
+  try { localStorage.setItem(SEASON_KEY, season); } catch {}
 }
-for (const [k, v] of Object.entries(SEASONS)) { const o = document.createElement('option'); o.value = k; o.textContent = 'Season: ' + v.label; $('season').append(o); }
-$('season').addEventListener('change', e => setSeason(e.target.value));
+let season = 'summer';
+choiceMenu($('season'), () => Object.entries(SEASONS).map(([id, v]) => ({ id, label: v.label, on: id === season })), setSeason);
+$('season').addEventListener('click', () => { const k = Object.keys(SEASONS); setSeason(k[(k.indexOf(season) + 1) % k.length]); });
 setSeason(new URLSearchParams(location.search).get('season') || (() => { try { return localStorage.getItem(SEASON_KEY); } catch { return null; } })() || 'summer');
 EXT_WORDS.push([/\b(spring|frühling|frühjahr)\b/, 'Spring', () => setSeason('spring')], [/\b(summer|sommer)\b/, 'Summer', () => setSeason('summer')],
   [/\b(autumn|fall|herbst)\b/, 'Autumn', () => setSeason('autumn')], [/\b(winter)\b/, 'Winter', () => setSeason('winter')]);
@@ -1856,7 +2166,13 @@ if (COURSE_INFO.mine && (COURSE_INFO.quality === 'quick' || COURSE_INFO.quality 
       };
     }
   };
-  w.onerror = e => { chip.textContent = what + ' could not start (' + (e.message || 'worker error') + ')'; };
+  w.onerror = async e => {
+    // a worker that fails to load says nothing about why: load its parts here, where the reason shows
+    let why = e.message;
+    if (!why) why = await import('./js/builder.js').then(() => import('./js/store.js')).then(() => '', err => err.message);
+    console.warn('refine worker:', e, why);
+    chip.textContent = what + ' could not start (' + (why || 'worker error, see the console') + ') – tried again next ride';
+  };
   w.postMessage({ id: COURSE });
 }
 

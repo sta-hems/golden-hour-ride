@@ -7,8 +7,10 @@ Live: https://golden-hour-ride.space.fast/ · Leckhampton loop: https://golden-h
 ## What's in it
 
 - A choice of courses from the Course menu: an invented mountain valley, a real 11.9 km Leckhampton loop built from Environment Agency lidar, dressed as the 19th-century hill (sheep, hay stooks, quarry smoke), and real roads in Germany built from the states' 1 m terrain survey (see below).
-- Four looks: Golden, Overcast, Rain and Mist. Buttons at the top, keys 1–4, or by voice.
-- Four seasons from the Season menu, or by voice (“spring”, “Herbst”, …): spring green with trees in blossom, summer, autumn colours with the leaves thinning, and winter with snow on the ground and bare trees. The choice is kept in the browser; `?season=winter` sets it for one visit.
+- Four looks: Golden, Overcast, Rain and Mist. Point at the **Weather** button to choose (a click goes to the next), keys 1–4, or by voice.
+- Four seasons from the **Season** button (point at it to choose, a click goes to the next), or by voice (“spring”, “Herbst”, …): spring green with trees in blossom, summer, autumn colours with the leaves thinning, and winter with snow on the ground and bare trees. The choice is kept in the browser; `?season=winter` sets it for one visit.
+- Houses from OpenStreetMap up to 700 m either side of the road; larger buildings, L-shapes and blocks round a courtyard are cut into several boxes. The **Houses** button chooses between all houses (the default on German courses), only those further than 150 m from the road, where the simple shapes look best (the default on English ones), and none. The choice is kept in the browser.
+- On German courses the houses follow the place: in a city or town, town houses of three to five storeys in brick or coloured plaster, with shops on the ground floor along the main streets; in a village, houses of two or three storeys under steep roofs of red tile, some half-timbered, many with shutters; barns and garages in boards with a gate, churches with a tower and spire. The front faces the nearest road and has the door; the sides have fewer windows; chimneys on the roofs. Windows light up in the evening (a few in the golden hour, most under the stars). What OpenStreetMap says a building is (flats, shop, barn, church, farmhouse) and how many storeys it has comes first; the size of the place, from the map, decides the rest.
 - A small map of the course in the top left corner, with the towns and villages, the cars, and the height profile; click it for a bigger one.
 - Skip forward and back 250 m with the arrow keys.
 - Hide everything on screen for a clean view: the Hide info button, the H key, or say "hide". Press H, click, or say "show" to bring it back.
@@ -40,10 +42,10 @@ Press **Routes** in the ride, type a start and one or more places to ride by (to
 
 ## Radio, news boards and traffic
 
-- **Radio**: SWR3, hr3, BBC Radio 1, 2 and 3. The button steps through them; or say the station's name, “radio off”, “louder”, “quieter”.
+- **Radio**: BBC Radio 1, 2 and 3, hr1, hr2, hr3, SWR1 (Rheinland-Pfalz), SWR2 and SWR3. Click the button to switch the radio on or off (it picks up the last station); point at it for the station list. Or say the station's name, “radio off”, “louder”, “quieter”.
 - **News**: boards beside the road every 1 to 1.5 km with the latest headlines from tagesschau.de and hessenschau.de (BBC News on British courses). The News button turns them off.
 - **Traffic**: a few cars, about one for every 1.5 km, both ways (real models if you add them, see below), with the soft hum of an electric car and the hiss of their tyres. They slow for bends (braking before them, not in them). A car coming up behind waits well back until the other lane is clear for 320 m and no tight bend is coming, then passes with more than 2 m to spare and pulls in again 20 m ahead. The Traffic button turns them off; point at it for a slider that sets how busy the road is, from one car every 7 km to three per km (kept in the browser).
-- **Sound**: a mixer for everything you hear (wind and tyres, rain, traffic, radio). While the radio plays, wind and tyres drop back on their own; untick that in the mixer, or turn them right down.
+- **Sound**: point at it for a mixer for everything you hear (wind and tyres, rain, traffic, radio); a click turns all sound off and on. While the radio plays, wind and tyres drop back on their own; untick that in the mixer, or turn them right down.
 - **Voice** listens in German on German courses and in English on British ones; both sets of words work (“Regen”, “Nebel”, “Sonne”, “weiter”, “zurück”, “leichter”, “schwerer”, …).
 
 ## Real car models (optional)

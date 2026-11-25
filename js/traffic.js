@@ -261,9 +261,15 @@ export function init(ctx) {
   range.addEventListener('input', () => { step = +range.value; setCount(target()); say(); });
   range.addEventListener('change', () => { localStorage.setItem(DENS_KEY, step); clearTimeout(hideT); hideT = setTimeout(() => { pop.hidden = true; }, 1200); });   // set: off it goes
   btn.addEventListener('click', () => { if (!on) pop.hidden = true; else show(); });
+  let lastS = null;
   const frame = dt => {
     if (!on) return;
     const ac = ctx.audio(), vol = level('traffic'), me = ctx.st;
+    if (lastS !== null && Math.abs(fwd(lastS, me.s) - me.v * dt) > 20 && Math.abs(fwd(me.s, lastS) + me.v * dt) > 20) {
+      // the rider jumped (skip, back): a car that lands close behind, going the same way, is moved out of the way
+      for (const c of cars) if (c.dir > 0 && fwd(c.s, me.s) < 150) { c.s = ((me.s - 180 - rnd() * 120) % LEN + LEN) % LEN; c.v = Math.min(c.v, me.v + 6); c.passing = false; c.lat = LANE; c.latV = 0; }
+    }
+    lastS = me.s;
     for (const c of cars) {
       let want = Math.min(c.want, limit[c.dir][idx(c.s)]);
       // keep a distance to the car in front going the same way
@@ -271,22 +277,31 @@ export function init(ctx) {
         const gap = c.dir > 0 ? fwd(c.s, o.s) : fwd(o.s, c.s);
         if (gap < 40) want = Math.min(want, o.v + (gap - 25) * 0.3);
       }
+      if (c.dir < 0) {                                     // oncoming: slow right down for a car overtaking in your lane
+        for (const o of cars) if (o.passing && o.dir > 0) { const d = fwd(o.s, c.s); if (d < 150) want = Math.min(want, 3 + d * 0.05); }
+      }
+      let close = false;
       if (c.dir > 0) {                                     // coming up behind the rider
         const gap = fwd(c.s, me.s), past = fwd(me.s, c.s);
         if (past < 30) want = Math.max(want, me.v + 3);                 // just ahead of a fast rider (downhill): keep pulling away
-        if (gap < 6 || past < 6) c.passing = true;                       // never sit on top of the rider: take the other lane
+        if (past < 6 || (past < 30 && me.v > c.v + 0.5)) c.passing = true;   // the rider is catching it up: make room
         if (c.passing && past > 20 && past < LEN / 2) c.passing = false;     // well clear in front: back to the right lane
-        if (!c.passing && gap < 90) {
-          // overtake only with the other lane clear for 320 m and no tight bend coming
-          let clear = true;
-          for (const o of cars) if (o.dir < 0 && fwd(c.s, o.s) < 320) clear = false;
-          for (let d = 0; d < 160 && clear; d += 10) if (bend[idx(c.s + d)] < 15) clear = false;
-          if (clear && c.v > me.v + 1 && gap < 70) c.passing = true;
-          else if (!clear) want = Math.min(want, me.v + Math.max(0, gap - 25) * 0.3);   // otherwise ease off early and wait well back, about 25 m
+        if (gap < 120) {
+          // overtake only well faster than the rider, with no tight bend coming, and with the other lane clear for as far
+          // as an oncoming car could come while it is out there, with plenty to spare
+          const room = Math.min(c.want, limit[1][idx(c.s)]) - me.v;
+          const need = 100 + 1.4 * (gap + 25) / Math.max(0.5, room) * (c.want + 20);
+          let free = 1e9;
+          for (const o of cars) if (o.dir < 0) free = Math.min(free, fwd(c.s, o.s));
+          let bendOK = true;
+          for (let d = 0; d < 160 && bendOK; d += 10) if (bend[idx(c.s + d)] < 15) bendOK = false;
+          if (!c.passing && gap < 70 && room >= 3 && bendOK && free > need) c.passing = true;
+          if (c.passing && gap > 8 && free < need * 0.6) c.passing = false;   // something is coming after all, and it is not alongside yet: drop back
+          if (!c.passing) { want = Math.min(want, me.v + Math.max(0, gap - 25) * 0.3); close = gap < 40; }   // otherwise stay well back, about 25 m
         }
       }
       want = Math.max(0, want);
-      c.v += Math.max(-4 * dt, Math.min(2 * dt, want - c.v));
+      c.v += Math.max((close ? -9 : -4) * dt, Math.min(2 * dt, want - c.v));   // close behind the rider it may brake hard
       c.s = ((c.s + c.dir * c.v * dt) % LEN + LEN) % LEN;
       // the lane: your side for cars going your way, the other side for oncoming ones and for overtaking
       const lane = c.dir > 0 && !c.passing ? LANE : c.passing ? -LANE - Math.sign(LANE) * 0.4 : -LANE;   // overtaking: a little beyond the middle of the other lane, for room
