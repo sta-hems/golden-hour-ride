@@ -1,0 +1,11 @@
+{
+  "id": "idstein",
+  "name": "Idstein loop (K 707, K 708, B 275)",
+  "short": "Idstein",
+  "about": "Taunus, Hessen, just west of Idstein: L 3274 to the K 707, south on the K 708, back north on the B 275. Starts on the HVBG test tile near Oberauroff.",
+  "waypoints": [[50.2138164, 8.2514783], [50.2093908, 8.2492324], [50.1992853, 8.2427207], [50.2071208, 8.2538766], [50.2138164, 8.2514783]],
+  "profile": "car",
+  "zone": 32,
+  "drive": "right",
+  "start": 0
+}

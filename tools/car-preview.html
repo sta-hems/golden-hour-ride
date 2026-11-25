@@ -1,0 +1,26 @@
+<!doctype html>
+<!-- Looks at the traffic cars on their own: python3 serve.py, then open http://localhost:8791/tools/car-preview.html -->
+<html><head><meta charset="utf-8"><title>Car preview</title>
+<style>html,body{margin:0;height:100%;background:#9fb3c8}canvas{display:block}</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+</head><body><script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { buildStyle, STYLES, PAINTS } from '../js/traffic.js';
+const r = new THREE.WebGLRenderer({ antialias: true }); r.setSize(innerWidth, innerHeight); r.toneMapping = THREE.ACESFilmicToneMapping; document.body.append(r.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x9fb3c8);
+scene.environment = new THREE.PMREMGenerator(r).fromScene(new RoomEnvironment(), 0.04).texture;
+const cam = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.1, 100);
+const view = new URLSearchParams(location.search).get('view') || '3q';
+cam.position.set(...({ '3q': [7, 2.2, 9], side: [11, 1.2, 0], front: [0, 1.4, 11] })[view]); cam.lookAt(0, 0.7, 0);
+scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x6b5a3a, 1.2)); const sun = new THREE.DirectionalLight(0xfff0d8, 2.5); sun.position.set(5, 8, 6); scene.add(sun);
+scene.add(new THREE.Mesh(new THREE.PlaneGeometry(40, 40).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x3a3c40 })));
+const mats = await import('../js/traffic.js').then(m => m.materials());
+Object.keys(STYLES).forEach((k, n) => {
+  const parts = buildStyle(STYLES[k]), car = new THREE.Group();
+  const paint = new THREE.MeshPhysicalMaterial({ color: PAINTS[n * 2], metalness: 0.55, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.08 });
+  for (const [p, g] of Object.entries(parts)) car.add(new THREE.Mesh(g, p === 'body' ? paint : mats[p]));
+  car.position.x = (n - 1) * 2.6; car.position.z = (n - 1) * 1.5; scene.add(car);
+});
+r.render(scene, cam);
+</script></body></html>

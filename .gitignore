@@ -2,3 +2,4 @@ dist/
 index.v*.html
 .DS_Store
 __pycache__/
+tools/.cache/

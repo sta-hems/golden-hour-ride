@@ -20,7 +20,10 @@
   #ctl input { width: 150px; accent-color: #ffcf8f; }
   #ctl button { font: inherit; color: #fff; background: rgba(20,16,12,.45); border: 1px solid rgba(255,255,255,.35);
     border-radius: 999px; padding: 7px 13px; cursor: pointer; backdrop-filter: blur(6px); }
-  #ctl button:hover { background: rgba(20,16,12,.7); }
+  #ctl button:hover, #ctl select:hover { background: rgba(20,16,12,.7); }
+  #ctl select { font: inherit; letter-spacing: inherit; color: #fff; background: rgba(20,16,12,.45); border: 1px solid rgba(255,255,255,.35);
+    border-radius: 999px; padding: 6px 12px; cursor: pointer; backdrop-filter: blur(6px); max-width: 230px; }
+  #ctl select option { color: #000; }
   #ctl button.on { background: rgba(255,255,255,.3); border-color: #fff; }
   #wx { display: flex; gap: 4px; }
   #hills { display: flex; gap: 4px; align-items: center; }
@@ -47,6 +50,7 @@
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
 } }
 </script>
+<script src="assets/courses.js?v=1"></script>
 </head>
 <body>
 <canvas id="c"></canvas>
@@ -62,7 +66,8 @@
   <span>↑ ↓ keys</span>
   <button id="skip" title="Jump 250 m up the road (→ key; ← goes back)">Skip 250 m ›</button>
   <button id="voice" title="Say: rain, mist, overcast, sunny, skip, back, hide or show. For a smart trainer: easier or gear down, harder or gear up, flat, full">Voice: off</button>
-  <button id="course" title="Switch between the invented valley and the real Leckhampton Hill loop">Course</button>
+  <select id="course" title="Choose a course: the invented valley or a real road built from survey data" aria-label="Course"></select>
+  <button id="plan" title="Plan your own route: from one place, by others, and back. Germany only">Routes</button>
   <span id="wx"><button data-w="snow">Snow</button><button data-w="golden" class="on">Golden</button><button data-w="overcast">Overcast</button><button data-w="rain">Rain</button><button data-w="mist">Mist</button><button data-w="starry">Starry</button></span>
   <button id="bt">Connect trainer</button>
   <span id="hills" title="How much of each hill a smart trainer makes you feel. Turn it down if the climbs are too hard; 0 % is flat."><button id="hless" aria-label="Make hills easier">−</button><span id="hval">Hills 50 %</span><button id="hmore" aria-label="Make hills harder">+</button></span>
@@ -145,7 +150,7 @@ scene.add(camera);
 
 /* ---------- sky, sun, haze ---------- */
 // ?theme=christmas: the same valley under snow at dusk, with lights in the trees and a few chalets
-const XMAS = new URLSearchParams(location.search).get('theme') === 'christmas' && new URLSearchParams(location.search).get('course') !== 'leckhampton';
+const XMAS = new URLSearchParams(location.search).get('theme') === 'christmas' && (new URLSearchParams(location.search).get('course') || 'valley') === 'valley';
 const SUN_ELEV = XMAS ? 4.5 : 11, SUN_AZ = -24;
 const sunDir = new V3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - SUN_ELEV), THREE.MathUtils.degToRad(SUN_AZ));
 const sunFlat = new V3(sunDir.x, 0, sunDir.z).normalize();
@@ -194,17 +199,30 @@ const hemi = new THREE.HemisphereLight(XMAS ? 0xa6b4ea : 0xa9b8ee, XMAS ? 0x9aa2
 scene.add(hemi);
 
 /* ---------- course: the invented valley, or a real road built from survey data ---------- */
-const COURSE = new URLSearchParams(location.search).get('course') === 'leckhampton' ? 'leckhampton' : 'valley';
+// the real courses are listed in assets/courses.js (tools/build_course_de.py adds German ones to it)
+// and routes planned in this browser with the route planner (js/planner.js) are kept in IndexedDB (js/store.js)
+let SAVED = [];
+try { SAVED = (await (await import('./js/store.js')).listCourses()).map(c => ({ ...c, mine: true })); } catch (err) { console.warn('saved routes:', err); }
+const COURSES = [...SAVED.filter(c => c.fav), { id: 'valley', name: 'Valley (invented)', short: 'Alps' },
+  ...(window.RIDE_COURSE_LIST || [{ id: 'leckhampton', name: 'Leckhampton Hill loop', short: 'Leckhampton', start: 850, vintage: true }]),
+  ...SAVED.filter(c => !c.fav)];
+const COURSE_INFO = COURSES.find(c => c.id === new URLSearchParams(location.search).get('course')) || COURSES[0];
+const COURSE = COURSE_INFO.id;
 // Scenery mode (?scenery): the ride drifts along on its own at a gentle pace with nothing on screen and the weather
 // slowly changing, for leaving on in the background. ?scenery=nobars also hides the handlebars.
 const SCENERY = new URLSearchParams(location.search).get('scenery');
 let real = null;
 if (COURSE !== 'valley') {
-  $('loading').textContent = 'Building Leckhampton Hill…';
+  $('loading').textContent = `Building ${COURSE_INFO.name}…`;
   const addScript = src => new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('missing ' + src)); document.head.append(s); });
   const DATA = 3;          // bump when the course files change, so browsers don't reuse an old copy
-  await addScript(`assets/${COURSE}.js?v=${DATA}`);
-  await addScript(`assets/${COURSE}_osm.js?v=${DATA}`).catch(() => {});          // buildings, woods and hedges are optional
+  if (COURSE_INFO.mine) {                 // planned in this browser
+    const rec = await (await import('./js/store.js')).getCourse(COURSE);
+    window.RIDE_COURSES = window.RIDE_COURSES || {}; window.RIDE_COURSES[COURSE] = rec.course; rec.course.osm = rec.osm;
+  } else {
+    await addScript(`assets/${COURSE}.js?v=${DATA}`);
+    await addScript(`assets/${COURSE}_osm.js?v=${DATA}`).catch(() => {});          // buildings, woods and hedges are optional
+  }
   real = window.RIDE_COURSES[COURSE];
   real.osm = real.osm || { buildings: [], trees: [], lines: [], woods: '', credit: '' };
   const wb = Uint8Array.from(atob(real.osm.woods), c => c.charCodeAt(0));
@@ -217,8 +235,17 @@ if (COURSE !== 'valley') {
   real.h = Float32Array.from(q, v => real.demMin + v / 65535 * (real.demMax - real.demMin));     // surveyed ground heights, metres
   $('credit').textContent = real.credit + ' ' + real.osm.credit;
 }
-$('course').textContent = real ? 'Course: Leckhampton' : 'Course: Valley';
-$('course').addEventListener('click', () => { location.search = real ? '' : '?course=leckhampton'; });
+for (const c of COURSES) {
+  const o = document.createElement('option'); o.value = c.id;
+  o.textContent = (c.fav ? '★ ' : '') + 'Course: ' + c.name + (c.km ? ` · ${c.km} km` : '') + (c.climb ? ` · ${c.climb} m up` : '');
+  o.selected = c.id === COURSE; $('course').append(o);
+}
+$('plan').addEventListener('click', async () => (await import('./js/planner.js')).togglePlanner({ current: COURSE }));
+$('course').addEventListener('change', e => {
+  const q = new URLSearchParams(location.search); q.delete('course');
+  if (e.target.value !== 'valley') q.set('course', e.target.value);
+  location.search = q.toString();
+});
 function demH(x, z) {                 // the real ground under a point
   const g = real.cells, w = g + 1, f = v => Math.min(g - 1e-6, Math.max(0, (v + real.size / 2) / (real.size / g)));
   const fx = f(x), fz = f(z), ix = Math.floor(fx), iz = Math.floor(fz), u = fx - ix, v = fz - iz, h = real.h;
@@ -276,6 +303,34 @@ function nearRoad(x, z) {
   return near;
 }
 
+/* ---------- side roads at junctions, and bridges (German courses; see tools/build_course_de.py) ---------- */
+const SIDE = real && real.osm.side || [];
+const sideHash = new Map(), SCELL = 20, skey = (cx, cz) => cx * 8192 + cz;
+for (const [w, , f] of SIDE) for (let k = 0; k < f.length; k += 3) {
+  const key = skey(Math.floor(f[k] / SCELL), Math.floor(f[k + 2] / SCELL));
+  (sideHash.get(key) || sideHash.set(key, []).get(key)).push([f[k], f[k + 1], f[k + 2], w / 2]);
+}
+const sideAt = { d: 0, y: 0 };
+function nearSide(x, z) {             // how far from the edge of a side road (negative: on it), and its height there
+  if (!sideHash.size) return null;
+  const cx = Math.floor(x / SCELL), cz = Math.floor(z / SCELL);
+  let best = 1e9, y = 0;
+  for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+    const arr = sideHash.get(skey(cx + dx, cz + dz));
+    if (arr) for (const [px, py, pz, hw] of arr) { const d = Math.hypot(x - px, z - pz) - hw; if (d < best) { best = d; y = py; } }
+  }
+  if (best > 1e8) return null;
+  sideAt.d = best; sideAt.y = y; return sideAt;
+}
+const onBridge = new Uint8Array(N), bridgeRuns = [];
+if (real && real.bridges) for (const [x0, z0, x1, z1] of real.bridges) {
+  let a = nearRoad(x0, z0).i, b = nearRoad(x1, z1).i;
+  if ((b - a + N) % N > N / 2) [a, b] = [b, a];
+  const run = [];
+  for (let i = a; ; i = (i + 1) % N) { onBridge[i] = 1; run.push(i); if (i === b || run.length > N / 2) break; }
+  bridgeRuns.push(run);
+}
+
 /* ---------- terrain ---------- */
 function baseH(x, z) {
   if (real) return demH(x, z);
@@ -289,9 +344,14 @@ function baseH(x, z) {
 }
 function terrainH(x, z) {
   const b = baseH(x, z), n = nearRoad(x, z);
-  if (!n) return b;
-  const k = real ? smooth(6, 34, n.d) : smooth(9, 62, n.d);     // a real hillside keeps its shape closer to the road
-  return (n.y - 0.6) * (1 - k) + b * k;
+  let h = b;
+  if (n && !onBridge[n.i]) {              // under a bridge the valley keeps its shape
+    const k = real ? smooth(6, 34, n.d) : smooth(9, 62, n.d);     // a real hillside keeps its shape closer to the road
+    h = (n.y - 0.6) * (1 - k) + b * k;
+  }
+  const s = nearSide(x, z);               // and the ground settles to meet the side roads
+  if (s) { const k = smooth(0.5, 9, s.d); h = (s.y - 0.35) * (1 - k) + h * k; }
+  return h;
 }
 const TS = real ? real.size : 3200, TG = real ? real.cells : 400, TC = TS / TG, TW = TG + 1;
 const H = new Float32Array(TW * TW);
@@ -491,8 +551,83 @@ function shoulderTex() {
   return t;
 }
 const shoulderMat = new THREE.MeshStandardMaterial({ map: shoulderTex(), roughness: 1 });
-for (const g of [strip(-6.8, -0.72, -3.5, 0.005, 1, 0, LEN / 5), strip(3.5, 0.005, 6.8, -0.72, 0, 1, LEN / 5)]) {
+for (const [g, outer] of [[strip(-6.8, -0.72, -3.5, 0.005, 1, 0, LEN / 5), 0], [strip(3.5, 0.005, 6.8, -0.72, 0, 1, LEN / 5), 1]]) {
+  const pos = g.attributes.position.array;
+  for (let i = 0; i <= N; i++) if (onBridge[i % N]) for (let c = 0; c < 3; c++) pos[i * 6 + outer * 3 + c] = pos[i * 6 + (1 - outer) * 3 + c];   // fold the verge away over a bridge
+  g.computeVertexNormals();
   const m = new THREE.Mesh(g, shoulderMat); m.receiveShadow = true; scene.add(m);
+}
+
+/* ---------- bridges: a concrete deck with parapets and a steel rail, piers down to the valley floor ---------- */
+if (bridgeRuns.length) {
+  const conc = [], steel = [], m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), zAxis = new V3(0, 0, 1), up = new V3(0, 1, 0);
+  const dir = new V3(), side = new V3(), ctr = new V3(), sc = new V3();
+  const put = (list, a, b, off, top, w, h) => {      // a box along the road from a to b, shifted sideways, its top at road height + top
+    dir.subVectors(b, a); const len = dir.length(); dir.normalize(); side.set(-dir.z, 0, dir.x).normalize();
+    ctr.addVectors(a, b).multiplyScalar(0.5).addScaledVector(side, off); ctr.y += top - h / 2;
+    q.setFromUnitVectors(zAxis, dir);
+    list.push(m4.compose(ctr, q, sc.set(w, h, len + 0.08)).clone());
+  };
+  const post = (list, p, t, along, w, d, top, bottom) => {   // an upright block from bottom to top
+    q.setFromAxisAngle(up, Math.atan2(t.x, t.z));
+    list.push(m4.compose(ctr.set(p.x, (top + bottom) / 2, p.z).addScaledVector(t, along), q, sc.set(w, top - bottom, d)).clone());
+  };
+  for (const run of bridgeRuns) {
+    for (let k = 0; k + 1 < run.length; k++) {
+      const a = P[run[k]], b = P[run[k + 1]];
+      put(conc, a, b, 0, -0.03, 9.4, 1.0);                                   // deck, just under the asphalt
+      for (const o of [-4.45, 4.45]) {                                       // a low concrete kerb, a steel rail on posts above it
+        put(conc, a, b, o, 0.35, 0.5, 0.65); put(steel, a, b, o, 1.05, 0.07, 0.09); put(steel, a, b, o, 0.7, 0.04, 0.05);
+        if (k % 2 === 0) { const pp = a.clone().addScaledVector(R[run[k]], o); post(steel, pp, T[run[k]], 0, 0.07, 0.07, a.y + 1.03, a.y + 0.3); }
+      }
+    }
+    const len = run.length * LEN / N;
+    if (len > 26) for (let k = Math.round(run.length / Math.round(len / 18)); k < run.length - 8; k += Math.round(run.length / Math.round(len / 18))) {
+      const p = P[run[k]], g = Math.min(meshH(p.x + R[run[k]].x * 3, p.z + R[run[k]].z * 3), meshH(p.x - R[run[k]].x * 3, p.z - R[run[k]].z * 3));
+      if (p.y - 1.1 - g > 0.5) post(conc, p, T[run[k]], 0, 6.2, 1.2, p.y - 1, g - 1);      // piers where the deck is well above the ground
+    }
+    for (const [i, out] of [[run[0], -1], [run[run.length - 1], 1]]) {      // abutments: blocks at each end, set into the bank
+      const p = P[i]; post(conc, p, T[i], out * 1.2, 9.8, 3, p.y - 0.12 - 3 * Math.abs(T[i].y), Math.min(meshH(p.x, p.z), p.y) - 4);     // its top stays under the asphalt on a slope
+    }
+  }
+  const box = new THREE.BoxGeometry(1, 1, 1);
+  for (const [list, mat] of [[conc, new THREE.MeshStandardMaterial({ map: speckleTex(256, 128, 46, 2600), color: 0xb9b4aa, roughness: 0.95 })],
+                             [steel, new THREE.MeshStandardMaterial({ color: 0x6a6f75, roughness: 0.45, metalness: 0.6 })]]) {
+    const m = new THREE.InstancedMesh(box, mat, list.length);
+    list.forEach((mm, i) => m.setMatrixAt(i, mm));
+    m.castShadow = m.receiveShadow = true; m.frustumCulled = false; scene.add(m);
+  }
+  st0.bridges = bridgeRuns.map(r => Math.round(r.length * LEN / N));
+}
+
+/* ---------- side roads: the first stretch of each road that meets the route ---------- */
+if (SIDE.length) {
+  const gravelMap = imgTex(imgGravel, true);
+  const bufs = [[], []].map(() => ({ pos: [], uv: [], idx: [] }));
+  for (const [w, kind, f] of SIDE) {
+    const b = bufs[kind], n = f.length / 3, base = b.pos.length / 3;
+    let run = 0;
+    for (let i = 0; i < n; i++) {
+      const j0 = Math.max(0, i - 1), j1 = Math.min(n - 1, i + 1);
+      let tx = f[j1 * 3] - f[j0 * 3], tz = f[j1 * 3 + 2] - f[j0 * 3 + 2]; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
+      if (i) run += Math.hypot(f[i * 3] - f[i * 3 - 3], f[i * 3 + 2] - f[i * 3 - 1]);
+      const x = f[i * 3], z = f[i * 3 + 2], nr = nearRoad(x, z), hw = w / 2 * (i === n - 1 ? 0.6 : 1);
+      let y = f[i * 3 + 1] - 0.04;
+      if (nr && nr.d < 4.2) y = Math.min(y, nr.y - 0.07);       // tucked under the route's own asphalt where they overlap
+      b.pos.push(x + tz * hw, y, z - tx * hw, x - tz * hw, y, z + tx * hw);      // left edge, then right, like the road strip
+      b.uv.push(...(kind ? [0, run / 3, w / 3, run / 3] : [0, run / 12, 1, run / 12]));
+      if (i) b.idx.push(base + 2 * i - 2, base + 2 * i - 1, base + 2 * i, base + 2 * i - 1, base + 2 * i + 1, base + 2 * i);
+    }
+  }
+  const mats = [new THREE.MeshStandardMaterial({ map: asphaltMap, normalMap: asphaltNormal, roughness: 0.95 }), new THREE.MeshStandardMaterial({ map: gravelMap, roughness: 1 })];
+  bufs.forEach((b, kind) => {
+    if (!b.idx.length) return;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(b.uv, 2));
+    g.setIndex(b.idx); g.computeVertexNormals();
+    const m = new THREE.Mesh(g, mats[kind]); m.receiveShadow = true; scene.add(m);
+  });
+  st0.side = SIDE.length;
 }
 
 /* ---------- grass along the verge (chunks, only the near ones are drawn) ---------- */
@@ -536,6 +671,8 @@ const chunks = [];
       const x = P[i].x + R[i].x * side * d + T[i].x * j, z = P[i].z + R[i].z * side * d + T[i].z * j;
       let y = meshH(x, z);
       if (d < 6.8) y = Math.max(y, P[i].y + T[i].y * j - 0.72 * (d - 3.5) / 3.3);
+      const sd = nearSide(x, z);
+      if (onBridge[i] || (sd && sd.d < 0.6)) { mesh.setMatrixAt(k, m4.makeScale(0, 0, 0)); continue; }
       const tall = 0.28 + rnd() * 0.5 + (d > 5 ? rnd() * 0.25 : 0);
       ps.set(x, y - 0.03, z); q.setFromAxisAngle(up, rnd() * 6.283); sc.set(0.5 + rnd() * 0.5, tall, 0.5 + rnd() * 0.5);
       mesh.setMatrixAt(k, m4.compose(ps, q, sc));
@@ -547,9 +684,9 @@ const chunks = [];
   if (!XMAS) for (let c0 = 0; c0 + PER <= N; c0 += PER) chunks.push({ c: P[c0 + PER / 2], mesh: null, build: () => build(c0) });
 }
 
-/* ---------- 19th-century touches (real courses): sheep on the hill, hay stooks in the vale ---------- */
+/* ---------- 19th-century touches (Leckhampton): sheep on the hill, hay stooks in the vale ---------- */
 const stamps = [];       // patches where the meadow is grazed short or cut to stubble
-if (real) {
+if (real && COURSE_INFO.vintage) {
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new V3(0, 1, 0), sc = new V3(), ps = new V3(), col = new THREE.Color();
   const open = (x, z) => Math.abs(x) < TS / 2 - 60 && Math.abs(z) < TS / 2 - 60 && !real.wood(x, z);
   const slopeAt = (x, z) => Math.hypot(demH(x + 10, z) - demH(x - 10, z), demH(x, z + 10) - demH(x, z - 10)) / 20;
@@ -618,8 +755,8 @@ if (real) {
 {
   const data = new Float32Array(TW * TW * 4), mix = tGeo.attributes.aMix.array;
   for (let k = 0; k < TW * TW; k++) {             // per terrain vertex: height, distance to road, rock/snow, dryness
-    const nr = nearRoad(tPos[k * 3], tPos[k * 3 + 2]);
-    data.set([H[k], nr ? Math.min(nr.d, 100) : 100, Math.max(mix[k * 2], mix[k * 2 + 1]), smooth(0.3, 0.7, fbm(tPos[k * 3] / 45, tPos[k * 3 + 2] / 45, 3))], k * 4);
+    const nr = nearRoad(tPos[k * 3], tPos[k * 3 + 2]), sd = nearSide(tPos[k * 3], tPos[k * 3 + 2]);
+    data.set([H[k], Math.min(nr ? nr.d : 100, sd ? Math.max(0, sd.d + 3.5) : 100, 100), Math.max(mix[k * 2], mix[k * 2 + 1]), smooth(0.3, 0.7, fbm(tPos[k * 3] / 45, tPos[k * 3 + 2] / 45, 3))], k * 4);
   }
   for (const s of stamps) {            // grazed pasture and stubble: shorter grass, or none
     const i0 = Math.round((s.x + TS / 2) / TC), j0 = Math.round((s.z + TS / 2) / TC), n = Math.ceil(s.r / TC);
@@ -860,6 +997,7 @@ if (XMAS) {
   for (let n = 0; n < (real ? 320000 : 70000) && spots.length < (real ? 26000 : 7000); n++) {
     const x = (rnd() - 0.5) * TS * 0.78, z = (rnd() - 0.5) * TS * 0.78, nr = nearRoad(x, z), d = nr ? nr.d : 999;
     if (d < 11) continue;
+    const sd = nearSide(x, z); if (sd && sd.d < 4) continue;
     if (chalets.some(c => (c[0] - x) ** 2 + (c[1] - z) ** 2 < 170)) continue;
     const forest = fbm(x / 140 + 3, z / 140 + 7, 3);
     if (real) {            // trees where the map says there is woodland, and never on a building
@@ -941,7 +1079,7 @@ if (real && real.osm.buildings.length) {
   const roofMat = new THREE.MeshStandardMaterial({ roughness: 0.8 });
   const walls = new THREE.InstancedMesh(box, wallMat, B.length), pitched = new THREE.InstancedMesh(hip, roofMat, B.length), flat = new THREE.InstancedMesh(box, roofMat, B.length);
   let np = 0, nf = 0, nw = 0;
-  const SHOW_TOWN = false;     // 19th-century Leckhampton: a village among fields, so the modern town is left out
+  const SHOW_TOWN = !COURSE_INFO.vintage;     // 19th-century Leckhampton: a village among fields, so the modern town is left out
   const KEEP_OUT = 150;        // simple house shapes only hold up at a distance, so none are drawn near the road
   const farFromRoad = (x, z) => { for (let k = 0; k < N; k += 8) { const ex = P[k].x - x, ez = P[k].z - z; if (ex * ex + ez * ez < KEEP_OUT * KEEP_OUT) return false; } return true; };
   B.forEach(([x, z, w, d, ang, h, roof]) => {
@@ -1316,7 +1454,7 @@ addEventListener('resize', () => {
 });
 
 /* ---------- input: keys, slider, smart trainer ---------- */
-const START = real ? 850 : 0;          // Leckhampton: begin on the lane about 150 m below where the hill steepens, not out in the vale
+const START = real ? COURSE_INFO.start || 0 : 0;     // Leckhampton: 850, on the lane about 150 m below where the hill steepens
 const st = { s: START, v: 6, power: 220, target: 220, dist: 0, trainer: false };
 window.ride = st; st.haze = hazeCol; st.built = st0;
 st.goNear = (x, z) => { let b = 0, bd = 1e12; for (let i = 0; i < N; i++) { const d = (P[i].x - x) ** 2 + (P[i].z - z) ** 2; if (d < bd) { bd = d; b = i; } } st.s = Math.max(0, b * LEN / N - 60); return Math.round(Math.sqrt(bd)); };   // for checking: ride to the road nearest a point
@@ -1507,7 +1645,7 @@ setHills(HILLS * 100);
   const draw = () => {
     const all = load().filter(r => r.t !== ride.t); if (st.dist >= MIN) all.push({ ...ride, m: Math.round(st.dist) });
     const today = new Date().toDateString(), sum = f => all.filter(f).reduce((a, r) => a + r.m, 0);
-    const rows = all.slice(-10).reverse().map(r => `<tr><td>${day(r.t)}</td><td class="muted">${r.c === 'leckhampton' ? 'Leckhampton' : 'Alps'}</td><td class="muted">${mins(r.s)}</td><td>${km(r.m)} km</td></tr>`).join('');
+    const rows = all.slice(-10).reverse().map(r => `<tr><td>${day(r.t)}</td><td class="muted">${(COURSES.find(c => c.id === r.c) || COURSES[0]).short}</td><td class="muted">${mins(r.s)}</td><td>${km(r.m)} km</td></tr>`).join('');
     box.innerHTML = `<h3>Ride log</h3><div class="tot"><div><b>${km(sum(r => new Date(r.t).toDateString() === today))}</b><span>km today</span></div>` +
       `<div><b>${km(sum(() => true))}</b><span>km in total</span></div><div><b>${all.length}</b><span>rides</span></div></div>` +
       (rows ? `<table>${rows}</table>` : `<div class="muted">Rides appear here after the first 100 m.</div>`) +
@@ -1522,32 +1660,33 @@ setHills(HILLS * 100);
 }
 
 /* ---------- voice: change the weather, or skip, by speaking ---------- */
+const EXT_WORDS = [];                    // added by the add-ons (radio, news): [pattern, label, action]
 {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition, btn = $('voice');
   const WORDS = [                      // the first match in what was heard wins
-    [/\b(easier|easy|lighter|less|ease|gear down|shift down|change down|lower gear|down a gear)\b/, () => $('hval').textContent, () => setHills(HILLS * 100 - 20)],
-    [/\b(harder|hard|heavier|more|tougher|gear up|shift up|change up|higher gear|up a gear)\b/, () => $('hval').textContent, () => setHills(HILLS * 100 + 20)],
-    [/\b(flat|no hills|hills off)\b/, () => $('hval').textContent, () => setHills(0)],
-    [/\b(full|real hills|all of it)\b/, () => $('hval').textContent, () => setHills(100)],
+    [/\b(easier|easy|lighter|less|ease|gear down|shift down|change down|lower gear|down a gear|leichter|einfacher|runterschalten|herunterschalten)\b/, () => $('hval').textContent, () => setHills(HILLS * 100 - 20)],
+    [/\b(harder|hard|heavier|more|tougher|gear up|shift up|change up|higher gear|up a gear|schwerer|härter|hochschalten)\b/, () => $('hval').textContent, () => setHills(HILLS * 100 + 20)],
+    [/\b(flat|no hills|hills off|flach|eben)\b/, () => $('hval').textContent, () => setHills(0)],
+    [/\b(full|real hills|all of it|voll|volle berge)\b/, () => $('hval').textContent, () => setHills(100)],
     ...(XMAS ? [[/\b(snow|snowing|snowy|christmas)\b/, 'Snow', () => setWeather('snow')]] : []),
-    [/\b(rain|raining|rainy|storm|wet)\b/, 'Rain', () => setWeather('rain')],
-    [/\b(mist|misty|fog|foggy)\b/, 'Mist', () => setWeather('mist')],
-    [/\b(overcast|cloud|clouds|cloudy|grey|gray)\b/, 'Overcast', () => setWeather('overcast')],
-    [/\b(golden|sun|sunny|sunshine|sunset|clear|evening)\b/, 'Golden', () => setWeather('golden')],
+    [/\b(rain|raining|rainy|storm|wet|regen|gewitter)\b/, 'Rain', () => setWeather('rain')],
+    [/\b(mist|misty|fog|foggy|nebel|neblig)\b/, 'Mist', () => setWeather('mist')],
+    [/\b(overcast|cloud|clouds|cloudy|grey|gray|bewölkt|wolken|wolkig|grau)\b/, 'Overcast', () => setWeather('overcast')],
+    [/\b(golden|sun|sunny|sunshine|sunset|clear|evening|sonne|sonnig|abendsonne)\b/, 'Golden', () => setWeather('golden')],
     ...(LAB ? [[/\b(starry|stars|night|painting|van gogh)\b/, 'Starry', () => setWeather('starry')]] : []),
-    [/\b(skip|forward|ahead)\b/, 'Skip ahead', () => skip(250)],
-    [/\bback\b/, 'Skip back', () => skip(-250)],
-    [/\b(hide|hidden)\b/, 'Info hidden', () => setClean(true)],
-    [/\b(show|info|display)\b/, 'Info shown', () => setClean(false)]];
+    [/\b(skip|forward|ahead|weiter|vorspulen)\b/, 'Skip ahead', () => skip(250)],
+    [/\b(back|zurück)\b/, 'Skip back', () => skip(-250)],
+    [/\b(hide|hidden|ausblenden|verstecken)\b/, 'Info hidden', () => setClean(true)],
+    [/\b(show|info|display|einblenden|anzeigen)\b/, 'Info shown', () => setClean(false)]];
   let rec = null, on = false, last = 0;
   const label = t => { btn.textContent = t; btn.classList.toggle('on', on); };
   if (!SR) { btn.title = 'Voice control needs Chrome or Edge'; btn.addEventListener('click', () => label('Voice: needs Chrome')); }
   else btn.addEventListener('click', () => {
     if (on) { on = false; rec.stop(); label('Voice: off'); return; }
-    rec = new SR(); rec.continuous = true; rec.interimResults = true; rec.lang = 'en-GB';
+    rec = new SR(); rec.continuous = true; rec.interimResults = true; rec.lang = COURSE_INFO.drive === 'right' ? 'de-DE' : 'en-GB';
     rec.onresult = e => {
       for (let i = e.resultIndex; i < e.results.length; i++) {
-        const heard = e.results[i][0].transcript.toLowerCase(), hit = WORDS.find(w => w[0].test(heard));
+        const heard = e.results[i][0].transcript.toLowerCase(), hit = EXT_WORDS.find(w => w[0].test(heard)) || WORDS.find(w => w[0].test(heard));
         if (hit && performance.now() - last > 2500) { last = performance.now(); hit[2](); label('Voice: ' + (typeof hit[1] === 'function' ? hit[1]() : hit[1])); }
       }
     };
@@ -1575,7 +1714,7 @@ function startAudio() {
 addEventListener('pointerdown', startAudio); addEventListener('keydown', startAudio);
 
 /* ---------- ride ---------- */
-const MASS = 80, LANE = -1.75, clock = new THREE.Clock();
+const MASS = 80, LANE = (COURSE_INFO.drive === 'right' ? 1 : -1) * 1.75, clock = new THREE.Clock();     // keep left in the UK, right in Germany
 const pose = mkPose(), ahead = mkPose(), probe = mkPose(), look = new V3(), sunNdc = new V3(), fwd = new V3();
 let lean = 0, phase = 0, grade = 0, huT = 0, first = true;
 // scenery mode's weather, in order, and how many seconds each one stays
@@ -1583,9 +1722,21 @@ const SCENE_PLAN = XMAS ? [['snow', 280], ['mist', 100], ['snow', 180], ['golden
 let scene_t = 0, scene_i = 0;
 if (SCENERY !== null) { setClean(true); st.target = st.power = 90; if (SCENERY === 'nobars') rig.visible = false; }
 
+/* ---------- add-ons (js/): web radio, news boards, oncoming traffic ---------- */
+const frameHooks = [];
+{
+  const ctx = { scene, camera, P, T, R, N, LEN, at, mkPose, meshH, nearRoad, nearSide, onBridge, st, LANE, COURSE_INFO, real, rnd, $,
+    addVoice: (pattern, label, action) => EXT_WORDS.push([pattern, label, action]) };
+  for (const name of ['radio', 'news', 'traffic']) {
+    try { const f = await (await import(`./js/${name}.js`)).init(ctx); if (typeof f === 'function') frameHooks.push(f); }
+    catch (err) { console.warn(`add-on ${name}:`, err); }
+  }
+}
+
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
   uTime.value += dt;
+  for (const f of frameHooks) f(dt);
 
   // power -> speed: gravity, rolling resistance and air drag
   st.power += (st.target - st.power) * Math.min(1, dt * 3);
