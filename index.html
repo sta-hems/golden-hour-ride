@@ -40,7 +40,11 @@
   #log td:last-child { text-align: right; }
   #log .muted { opacity: .65; }
   #log button { margin-top: 12px; font: inherit; font-size: 11px; color: #fff; background: none; border: 1px solid rgba(255,255,255,.35); border-radius: 999px; padding: 4px 10px; cursor: pointer; }
-  body.clean #hud, body.clean #ctl, body.clean #log, body.clean #credit { display: none; }
+  body.clean #hud, body.clean #ctl, body.clean #log, body.clean #credit, body.clean #refine { display: none; }
+  #refine { position: fixed; left: 30px; bottom: 96px; padding: 7px 12px; border-radius: 999px; font-size: 11px; letter-spacing: .06em;
+    background: rgba(20,16,12,.55); border: 1px solid rgba(255,255,255,.3); backdrop-filter: blur(6px); display: flex; gap: 8px; align-items: center; }
+  #refine button { font: inherit; color: #fff; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.4); border-radius: 999px; padding: 3px 10px; cursor: pointer; }
+  #refine button.go { background: #c98a3b; border-color: #e7b06a; }
   body.clean { cursor: none; }
   #credit { position: fixed; right: 14px; bottom: 10px; font-size: 10px; letter-spacing: .04em; opacity: .7; text-shadow: 0 1px 6px rgba(0,0,0,.7); max-width: 46vw; text-align: right; }
 </style>
@@ -65,9 +69,11 @@
   <input id="pwr" type="range" min="0" max="600" step="5" value="220" aria-label="Power in watts">
   <span>↑ ↓ keys</span>
   <button id="skip" title="Jump 250 m up the road (→ key; ← goes back)">Skip 250 m ›</button>
+  <button id="sound" title="Sound mixer: wind and tyres, rain, traffic and radio">Sound</button>
   <button id="voice" title="Say: rain, mist, overcast, sunny, skip, back, hide or show. For a smart trainer: easier or gear down, harder or gear up, flat, full">Voice: off</button>
   <select id="course" title="Choose a course: the invented valley or a real road built from survey data" aria-label="Course"></select>
   <button id="plan" title="Plan your own route: from one place, by others, and back. Germany only">Routes</button>
+  <select id="season" title="Season: spring blossom, summer, autumn colours, or winter snow" aria-label="Season"></select>
   <span id="wx"><button data-w="snow">Snow</button><button data-w="golden" class="on">Golden</button><button data-w="overcast">Overcast</button><button data-w="rain">Rain</button><button data-w="mist">Mist</button><button data-w="starry">Starry</button></span>
   <button id="bt">Connect trainer</button>
   <span id="hills" title="How much of each hill a smart trainer makes you feel. Turn it down if the climbs are too hard; 0 % is flat."><button id="hless" aria-label="Make hills easier">−</button><span id="hval">Hills 50 %</span><button id="hmore" aria-label="Make hills harder">+</button></span>
@@ -240,6 +246,7 @@ for (const c of COURSES) {
   o.textContent = (c.fav ? '★ ' : '') + 'Course: ' + c.name + (c.km ? ` · ${c.km} km` : '') + (c.climb ? ` · ${c.climb} m up` : '');
   o.selected = c.id === COURSE; $('course').append(o);
 }
+$('sound').addEventListener('click', async () => (await import('./js/sound.js')).toggleMixer());
 $('plan').addEventListener('click', async () => (await import('./js/planner.js')).togglePlanner({ current: COURSE }));
 $('course').addEventListener('change', e => {
   const q = new URLSearchParams(location.search); q.delete('course');
@@ -419,19 +426,24 @@ function speckleTex(size, base, spread, count) {
   t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = MAX_ANISO;
   return t;
 }
+/* ---------- seasons: spring, summer, autumn, winter (see setSeason below); these are shared by the materials ---------- */
+const uGrassTint = { value: new THREE.Color(1, 1, 1) }, uSnowCover = { value: 0 }, uLeafGrey = { value: 0 }, uThin = { value: 0 };
+const seasonal = {};              // the meshes and materials a season changes, filled in as they are built
 const rockMap = imgTex(imgRock, true);
 const terrainMat = new THREE.MeshStandardMaterial({ vertexColors: true, map: imgTex(imgGrass, true), normalMap: imgTex(imgGrassN), roughness: 1 });
 terrainMat.onBeforeCompile = s => {      // grass on the flats, rock on the steeps, snow up high; a second, larger sample hides the tiling
-  s.uniforms.uRock = { value: rockMap }; s.uniforms.uSunAmt = uSunAmt;
+  s.uniforms.uRock = { value: rockMap }; s.uniforms.uSunAmt = uSunAmt; s.uniforms.uGrassTint = uGrassTint; s.uniforms.uSnowCover = uSnowCover;
   s.vertexShader = 'attribute vec2 aMix; attribute float aShade; varying vec2 vMix; varying float vShade;\n' + s.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vMix = aMix; vShade = aShade;');
-  s.fragmentShader = 'uniform sampler2D uRock; uniform float uSunAmt; varying vec2 vMix; varying float vShade;\n' + s.fragmentShader.replace('#include <map_fragment>', `
+  s.fragmentShader = 'uniform sampler2D uRock; uniform float uSunAmt, uSnowCover; uniform vec3 uGrassTint; varying vec2 vMix; varying float vShade;\n' + s.fragmentShader.replace('#include <map_fragment>', `
     vec3 gc = mix(texture2D(map, vMapUv).rgb, texture2D(map, vMapUv * 0.137).rgb, 0.15);
     gc = mix(gc, vec3(gc.g * 0.6, gc.g * 1.05, gc.g * 0.35), 0.4);                       // lean the bare ground toward the grass colour, so the meadow's edge doesn't show
+    gc *= uGrassTint;                                                                      // the season's grass
     vec3 r1 = texture2D(uRock, vMapUv * 0.3).rgb, r2 = texture2D(uRock, vMapUv * 0.041).rgb, r3 = texture2D(uRock, vMapUv * 0.009).rgb;
     float l2 = dot(r2, vec3(0.333)), l3 = dot(r3, vec3(0.333));
     vec3 rc = mix(r1, r2, 0.4) * (0.35 + l2 * 1.2 + l3 * 1.6);                          // light and dark bands across whole rock faces
     float rockAmt = smoothstep(0.3, 0.7, vMix.x + (l2 - 0.3) * 0.9);                     // ragged edges where grass gives way to rock
     float snowAmt = smoothstep(0.35, 0.65, vMix.y + (l3 - 0.3) * 0.8);
+    snowAmt = max(snowAmt, uSnowCover * smoothstep(0.15, 0.55, 0.85 - vMix.x + (l2 - 0.3) * 0.7));   // winter: snow lies everywhere but the steepest rock
     diffuseColor.rgb *= mix(mix(gc, rc, rockAmt), ${XMAS ? 'vec3(0.66, 0.70, 0.78)' : 'vec3(0.92)'}, snowAmt) * mix(1., vShade, uSunAmt);`);
 };
 const terrain = new THREE.Mesh(tGeo, terrainMat);
@@ -455,7 +467,7 @@ function strip(offA, dyA, offB, dyB, uA, uB, vTiles) {
   g.computeVertexNormals();
   return g;
 }
-function asphaltTex() {
+function asphaltTex(paint = true) {
   const W = 1024, Hh = 2048, [c, g] = canvas2d(W * 2, Hh * 2);
   g.scale(2, 2);
   for (let x = 0; x < W; x += 439) for (let y = 0; y < Hh; y += 512) g.drawImage(imgAsphalt, x, y, 439, 512);   // 3 m scan tiles
@@ -476,11 +488,13 @@ function asphaltTex() {
     for (let k = 0, n = 20 + rnd() * 50; k < n; k++) { a += (rnd() - 0.5) * 1.1; x += Math.cos(a) * 9; y += Math.sin(a) * 9; g.lineTo(x, y); }
     g.stroke();
   }
-  g.fillStyle = 'rgba(224,220,206,0.92)';              // paint
-  g.fillRect(36, 0, 16, Hh); g.fillRect(972, 0, 16, Hh); g.fillRect(505, 0, 14, Hh / 3);
-  for (let i = 0; i < 6000; i++) {                     // worn paint
-    const s = 1 + rnd() * 3;
-    g.fillStyle = 'rgba(72,72,76,0.7)'; g.fillRect([36, 972, 505][i % 3] + rnd() * 16, rnd() * Hh, s, s * (1 + rnd() * 3));
+  if (paint) {
+    g.fillStyle = 'rgba(224,220,206,0.92)';              // paint
+    g.fillRect(36, 0, 16, Hh); g.fillRect(972, 0, 16, Hh); g.fillRect(505, 0, 14, Hh / 3);
+    for (let i = 0; i < 6000; i++) {                     // worn paint
+      const s = 1 + rnd() * 3;
+      g.fillStyle = 'rgba(72,72,76,0.7)'; g.fillRect([36, 972, 505][i % 3] + rnd() * 16, rnd() * Hh, s, s * (1 + rnd() * 3));
+    }
   }
   if (XMAS) {                                          // snow ploughed to the edges, slush between the wheel tracks
     for (const [x0, x1] of [[0, 150], [W, W - 150]]) {
@@ -514,14 +528,30 @@ function wetTex() {   // roughness: mostly damp, with glassy standing water in t
 }
 const asphaltMap = asphaltTex();
 const asphaltNormal = imgTex(imgAsphaltN); asphaltNormal.repeat.set(7 / 3, 4);
-const road = new THREE.Mesh(strip(-3.5, 0, 3.5, 0, 0, 1, TILES),
+// where a side road leaves the route: [i * 2] on the left, [i * 2 + 1] on the right. The edge line stops across its mouth,
+// and the verge folds away, so the side road meets the asphalt directly.
+const mouth = new Uint8Array(N * 2);
+for (const [w, , f] of SIDE) for (let k = 0; k < f.length; k += 3) {
+  const nr = nearRoad(f[k], f[k + 2]);
+  if (!nr || nr.d < 3.3) continue;
+  if (nr.d > 9) break;
+  const i = nr.i, right = nr.side > 0 ? 1 : 0, reach = Math.ceil((w / 2 + 2) / (LEN / N));
+  for (let d = -reach; d <= reach; d++) mouth[((i + d) % N + N) % N * 2 + right] = 1;
+}
+const roadGeo = strip(-3.5, 0, 3.5, 0, 0, 1, TILES);
+{
+  const m = new Float32Array((N + 1) * 4);
+  for (let i = 0; i <= N; i++) { const j = i % N; m.set([mouth[j * 2], mouth[j * 2 + 1], mouth[j * 2], mouth[j * 2 + 1]], i * 4); }
+  roadGeo.setAttribute('aMouth', new THREE.BufferAttribute(m, 2));
+}
+const road = new THREE.Mesh(roadGeo,
   new THREE.MeshStandardMaterial({ map: asphaltMap, roughnessMap: wetTex(), roughness: 1, metalness: 0, normalMap: asphaltNormal, normalScale: new THREE.Vector2(1.2, 1.2), envMapIntensity: 1 }));
 road.receiveShadow = true;
 scene.add(road);
 road.material.onBeforeCompile = s => {      // rain rings: each small cell of road gets a ripple that spreads and fades
   s.uniforms.uTime = uTime; s.uniforms.uRain = rainU.uRain;
-  s.vertexShader = 'varying vec3 vWp;\n' + s.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vWp = (modelMatrix * vec4(transformed, 1.)).xyz;');
-  s.fragmentShader = `uniform float uTime, uRain; varying vec3 vWp;
+  s.vertexShader = 'attribute vec2 aMouth; varying vec2 vMouth; varying vec3 vWp;\n' + s.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vWp = (modelMatrix * vec4(transformed, 1.)).xyz; vMouth = aMouth;');
+  s.fragmentShader = `uniform float uTime, uRain; varying vec3 vWp; varying vec2 vMouth;
     vec2 rip(vec2 p, float t){
       vec2 i = floor(p), f = fract(p) - 0.5;
       float h1 = fract(sin(dot(i, vec2(127.1, 311.7))) * 43758.5453), h2 = fract(h1 * 57.31 + 0.37);
@@ -529,7 +559,11 @@ road.material.onBeforeCompile = s => {      // rain rings: each small cell of ro
       vec2 d = f - (vec2(h1, h2) - 0.5) * 0.24; float r = length(d) + 1e-4, R = life * 0.36;
       return d / r * sin((r - R) * 60.) * exp(-pow((r - R) * 14., 2.)) * (1. - life);
     }
-  ` + s.fragmentShader.replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+  ` + s.fragmentShader.replace('#include <map_fragment>', `
+    vec2 mUv = vMapUv;                       // across a junction's mouth, take plain asphalt from beside the edge line instead
+    if (vMouth.x > 0.5 && mUv.x < 0.075) mUv.x += 0.11;
+    if (vMouth.y > 0.5 && mUv.x > 0.925) mUv.x -= 0.11;
+    diffuseColor *= texture2D(map, mUv);`).replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
     if (uRain > 0.01) {
       vec2 rp = rip(vWp.xz * 3.2, uTime) + rip(vWp.xz * 2.1 + 13.7, uTime * 0.9 + 3.);
       normal = normalize(normal + (viewMatrix * vec4(rp.x, 0., rp.y, 0.)).xyz * 0.5 * uRain * smoothstep(40., 8., length(vViewPosition)));
@@ -553,7 +587,7 @@ function shoulderTex() {
 const shoulderMat = new THREE.MeshStandardMaterial({ map: shoulderTex(), roughness: 1 });
 for (const [g, outer] of [[strip(-6.8, -0.72, -3.5, 0.005, 1, 0, LEN / 5), 0], [strip(3.5, 0.005, 6.8, -0.72, 0, 1, LEN / 5), 1]]) {
   const pos = g.attributes.position.array;
-  for (let i = 0; i <= N; i++) if (onBridge[i % N]) for (let c = 0; c < 3; c++) pos[i * 6 + outer * 3 + c] = pos[i * 6 + (1 - outer) * 3 + c];   // fold the verge away over a bridge
+  for (let i = 0; i <= N; i++) if (onBridge[i % N] || mouth[(i % N) * 2 + outer]) for (let c = 0; c < 3; c++) pos[i * 6 + outer * 3 + c] = pos[i * 6 + (1 - outer) * 3 + c];   // fold the verge away over a bridge, and across a junction
   g.computeVertexNormals();
   const m = new THREE.Mesh(g, shoulderMat); m.receiveShadow = true; scene.add(m);
 }
@@ -561,11 +595,13 @@ for (const [g, outer] of [[strip(-6.8, -0.72, -3.5, 0.005, 1, 0, LEN / 5), 0], [
 /* ---------- bridges: a concrete deck with parapets and a steel rail, piers down to the valley floor ---------- */
 if (bridgeRuns.length) {
   const conc = [], steel = [], m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), zAxis = new V3(0, 0, 1), up = new V3(0, 1, 0);
-  const dir = new V3(), side = new V3(), ctr = new V3(), sc = new V3();
+  const dir = new V3(), side = new V3(), ctr = new V3(), sc = new V3(), xA = new V3(), yA = new V3(), rot = new THREE.Matrix4();
   const put = (list, a, b, off, top, w, h) => {      // a box along the road from a to b, shifted sideways, its top at road height + top
     dir.subVectors(b, a); const len = dir.length(); dir.normalize(); side.set(-dir.z, 0, dir.x).normalize();
     ctr.addVectors(a, b).multiplyScalar(0.5).addScaledVector(side, off); ctr.y += top - h / 2;
-    q.setFromUnitVectors(zAxis, dir);
+    // forward along the road, across always level (a plain rotation from +z would roll the deck on a sloping bend, and lift one edge through the asphalt)
+    xA.set(dir.z, 0, -dir.x).normalize(); yA.crossVectors(dir, xA);
+    q.setFromRotationMatrix(rot.makeBasis(xA, yA, dir));
     list.push(m4.compose(ctr, q, sc.set(w, h, len + 0.08)).clone());
   };
   const post = (list, p, t, along, w, d, top, bottom) => {   // an upright block from bottom to top
@@ -619,7 +655,8 @@ if (SIDE.length) {
       if (i) b.idx.push(base + 2 * i - 2, base + 2 * i - 1, base + 2 * i, base + 2 * i - 1, base + 2 * i + 1, base + 2 * i);
     }
   }
-  const mats = [new THREE.MeshStandardMaterial({ map: asphaltMap, normalMap: asphaltNormal, roughness: 0.95 }), new THREE.MeshStandardMaterial({ map: gravelMap, roughness: 1 })];
+  const mats = [new THREE.MeshStandardMaterial({ map: asphaltTex(false), roughnessMap: road.material.roughnessMap, roughness: 1, normalMap: asphaltNormal, normalScale: new THREE.Vector2(1.2, 1.2) }),
+                new THREE.MeshStandardMaterial({ map: gravelMap, roughness: 1 })];
   bufs.forEach((b, kind) => {
     if (!b.idx.length) return;
     const g = new THREE.BufferGeometry();
@@ -653,7 +690,8 @@ const tuftGeo = (() => {
 })();
 const grassMat = new THREE.MeshStandardMaterial({ map: grassTex(), alphaTest: 0.45, roughness: 1 });
 grassMat.onBeforeCompile = s => {
-  s.uniforms.uTime = uTime;
+  s.uniforms.uTime = uTime; s.uniforms.uGrassTint = uGrassTint; s.uniforms.uSnowCover = uSnowCover;
+  s.fragmentShader = 'uniform vec3 uGrassTint; uniform float uSnowCover;\n' + s.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb = mix(diffuseColor.rgb * uGrassTint, vec3(0.86, 0.88, 0.92), uSnowCover * 0.55);');
   s.vertexShader = 'uniform float uTime;\n' + s.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
     #ifdef USE_INSTANCING
       vec4 wp = instanceMatrix * vec4(0., 0., 0., 1.);
@@ -781,8 +819,8 @@ if (real && COURSE_INFO.vintage) {
   geo.instanceCount = COUNT;
   const mat = new THREE.MeshStandardMaterial({ map: grassMat.map, alphaTest: 0.45, roughness: 1, vertexColors: true });
   mat.onBeforeCompile = s => {
-    Object.assign(s.uniforms, { uTime, uField: { value: field }, uMeadowC: uMeadow });
-    s.vertexShader = 'uniform float uTime; uniform vec2 uMeadowC; uniform sampler2D uField; attribute vec4 aInst; attribute float aTall;\n' + s.vertexShader
+    Object.assign(s.uniforms, { uTime, uField: { value: field }, uMeadowC: uMeadow, uGrassTint, uSnowCover });
+    s.vertexShader = 'uniform float uTime, uSnowCover; uniform vec3 uGrassTint; uniform vec2 uMeadowC; uniform sampler2D uField; attribute vec4 aInst; attribute float aTall;\n' + s.vertexShader
       .replace('#include <color_vertex>', `
       vec2 wxz = mod(aInst.xy - uMeadowC, ${S.toFixed(1)}) - ${(S / 2).toFixed(1)} + uMeadowC;   // wrap around a point ahead of the rider
       vec2 gf = (wxz + ${(TS / 2).toFixed(1)}) / ${TC.toFixed(1)};
@@ -791,13 +829,15 @@ if (real && COURSE_INFO.vintage) {
       vec4 fa = texelFetch(uField, gi, 0), fb = texelFetch(uField, gi + ivec2(0, 1), 0), fc = texelFetch(uField, gi + ivec2(1, 1), 0), fd = texelFetch(uField, gi + ivec2(1, 0), 0);
       vec4 fl = gu.x + gu.y <= 1. ? fa + (fd - fa) * gu.x + (fb - fa) * gu.y : fc + (fb - fc) * (1. - gu.x) + (fd - fc) * (1. - gu.y);
       #include <color_vertex>
-      vColor.rgb *= mix(vec3(0.8, 0.95, 0.7), vec3(1.3, 1.15, 0.75), fl.w) * 1.15;                 // same green-to-dry tint as the ground beneath`)
+      vColor.rgb *= mix(vec3(0.8, 0.95, 0.7), vec3(1.3, 1.15, 0.75), fl.w) * 1.15 * uGrassTint;     // same green-to-dry tint as the ground beneath
+      vColor.rgb = mix(vColor.rgb, vec3(0.8, 0.8, 0.82), uSnowCover * 0.6);`)
       .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
       objectNormal = normalize(vec3(fa.x - fd.x, ${TC.toFixed(1)}, fa.x - fb.x));                  // take the hillside's light, not a flat field's`)
       .replace('#include <begin_vertex>', `
       vec2 dc = abs(wxz - uMeadowC);
       float keep = (1. - smoothstep(${(S * 0.36).toFixed(1)}, ${(S * 0.48).toFixed(1)}, max(dc.x, dc.y)))
-                 * smoothstep(12.5, 16.5, fl.y) * (1. - smoothstep(0.15, 0.5, fl.z));        // thin out far away, off the road, off the rock
+                 * smoothstep(12.5, 16.5, fl.y) * (1. - smoothstep(0.15, 0.5, fl.z))         // thin out far away, off the road, off the rock
+                 * (1. - uSnowCover * 0.75);                                                       // winter: only the tips show through the snow
       float cs = cos(aInst.z), sn = sin(aInst.z);
       vec3 loc = vec3(position.x * aInst.w, position.y * aTall, position.z * aInst.w);
       loc.xz = vec2(cs * loc.x - sn * loc.z, sn * loc.x + cs * loc.z);
@@ -977,7 +1017,16 @@ if (XMAS) {
   folGeo.setIndex(idx);
   const folMat = new THREE.MeshStandardMaterial({ map: treeMap, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.9 });
   folMat.onBeforeCompile = s => {
-    s.uniforms.uTime = uTime;
+    s.uniforms.uTime = uTime; s.uniforms.uLeafGrey = uLeafGrey; s.uniforms.uThin = uThin;
+    s.fragmentShader = 'uniform float uLeafGrey, uThin;\n' + s.fragmentShader.replace('#include <map_fragment>', `
+      // leaves fall: in autumn a few patches of each crown go, in winter most of it, leaving the twigs
+      if (uThin > 0. && fract(sin(dot(floor(vMapUv * vec2(22., 30.)), vec2(12.9898, 78.233))) * 43758.5453) < uThin) discard;
+      vec4 leaf = texture2D(map, vMapUv);                // autumn and winter: the leaves' own green gives way to the tree's colour
+      float grey = uLeafGrey;
+      #ifdef USE_INSTANCING_COLOR
+        grey = max(grey, step(1.5, vColor.r));            // a tree in blossom
+      #endif
+      diffuseColor *= vec4(mix(leaf.rgb, vec3(dot(leaf.rgb, vec3(0.3, 0.59, 0.11)) * 2.3), grey), leaf.a);`);
     s.vertexShader = 'uniform float uTime;\n' + s.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
       #ifdef USE_INSTANCING
         vec4 wp = instanceMatrix * vec4(0., 0., 0., 1.);
@@ -1028,6 +1077,7 @@ if (XMAS) {
     fol.setColorAt(i, col.setRGB(0.7 + rnd() * 0.3, 0.75 + rnd() * 0.25, 0.6 + rnd() * 0.3));
   });
   for (const m of [fol, trunk]) { m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; scene.add(m); }
+  Object.assign(seasonal, { fol, folMat, folBase: fol.instanceColor.array.slice(), pines: !real });
 }
 
 if (xl.p.length) {         // every Christmas light is one glowing point; bright enough to bloom
@@ -1104,7 +1154,7 @@ if (real && real.osm.buildings.length) {
   const [sc2, sg] = canvas2d(64, 64); sg.fillStyle = '#9c927c'; sg.fillRect(0, 0, 64, 64); speck(sg, 64, 64, 150, 90, 500);
   const tex = c => { const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; return t; };
   const L = real.osm.lines, kinds = [
-    new THREE.InstancedMesh(box, new THREE.MeshStandardMaterial({ map: tex(hc), roughness: 1 }), L.length),
+    seasonal.hedge = new THREE.InstancedMesh(box, new THREE.MeshStandardMaterial({ map: tex(hc), roughness: 1 }), L.length),
     new THREE.InstancedMesh(box, new THREE.MeshStandardMaterial({ map: tex(sc2), roughness: 1 }), L.length)], n = [0, 0];
   for (const [x1, z1, x2, z2, kind] of L) {
     const mx = (x1 + x2) / 2, mz = (z1 + z2) / 2, len = Math.hypot(x2 - x1, z2 - z1);
@@ -1456,6 +1506,12 @@ addEventListener('resize', () => {
 /* ---------- input: keys, slider, smart trainer ---------- */
 const START = real ? COURSE_INFO.start || 0 : 0;     // Leckhampton: 850, on the lane about 150 m below where the hill steepens
 const st = { s: START, v: 6, power: 220, target: 220, dist: 0, trainer: false };
+// back from switching a planned route to its survey heights: carry on from the same spot, as the same ride
+const RESUME_KEY = 'golden-hour-ride-resume';
+let resume = null;
+try { resume = JSON.parse(sessionStorage.getItem(RESUME_KEY) || 'null'); sessionStorage.removeItem(RESUME_KEY); } catch {}
+if (resume && (resume.course !== COURSE || Date.now() - resume.t > 120000)) resume = null;
+if (resume) { Object.assign(st, { s: resume.s, dist: resume.dist, target: resume.target, power: resume.target, v: resume.v || 6 }); $('pwr').value = resume.target; }
 window.ride = st; st.haze = hazeCol; st.built = st0;
 st.goNear = (x, z) => { let b = 0, bd = 1e12; for (let i = 0; i < N; i++) { const d = (P[i].x - x) ** 2 + (P[i].z - z) ** 2; if (d < bd) { bd = d; b = i; } } st.s = Math.max(0, b * LEN / N - 60); return Math.round(Math.sqrt(bd)); };   // for checking: ride to the road nearest a point
 st.weather = (n, i) => setWeather(n, i);
@@ -1624,12 +1680,14 @@ $('bt').addEventListener('click', async () => {
 });
 btLabel();
 setHills(HILLS * 100);
+if (resume && resume.trainer) setTimeout(() => $('bt').click(), 300);     // rejoin the trainer you had (works for one the browser already knows)
 
 /* ---------- ride log: distance ridden, kept in this browser (localStorage) ---------- */
 {
   const KEY = 'golden-hour-ride-log', MIN = 100;         // rides under 100 m are not kept
   const load = () => { try { const a = JSON.parse(localStorage.getItem(KEY)); return Array.isArray(a) ? a : []; } catch { return []; } };
-  const ride = { t: new Date().toISOString(), c: COURSE, m: 0, s: 0 };
+  const ride = { t: resume ? resume.logT : new Date().toISOString(), c: COURSE, m: 0, s: resume ? resume.secs : 0 };
+  st.logRide = ride;
   let last = performance.now(), ok = true;
   const save = () => {
     const now = performance.now();
@@ -1711,6 +1769,7 @@ function startAudio() {
   };
   audio = { ac, wind: mk('bandpass', 500, 0.5), tyre: mk('lowpass', 240, 0.8), rain: mk('highpass', 2600, 0.5) };
 }
+const { level: soundLevel } = await import('./js/sound.js');     // the mixer: each kind of sound has its own level
 addEventListener('pointerdown', startAudio); addEventListener('keydown', startAudio);
 
 /* ---------- ride ---------- */
@@ -1722,15 +1781,83 @@ const SCENE_PLAN = XMAS ? [['snow', 280], ['mist', 100], ['snow', 180], ['golden
 let scene_t = 0, scene_i = 0;
 if (SCENERY !== null) { setClean(true); st.target = st.power = 90; if (SCENERY === 'nobars') rig.visible = false; }
 
+/* ---------- seasons: the menu, the voice, and what each one changes ---------- */
+const SEASONS = {
+  spring: { label: 'Spring', grass: [0.86, 1.14, 0.78], snow: 0, grey: 0, thin: 0.06, blossom: 0.2, verge: [0.92, 1.1, 0.86], hedge: [0.9, 1.12, 0.85] },
+  summer: { label: 'Summer', grass: [1, 1, 1], snow: 0, grey: 0, verge: [1, 1, 1], hedge: [1, 1, 1] },
+  autumn: { label: 'Autumn', grass: [1.12, 0.98, 0.7], snow: 0, grey: 1, thin: 0.18, verge: [1.1, 0.96, 0.72], hedge: [1.15, 0.92, 0.62],
+            palette: [[1.25, 0.55, 0.12], [1.2, 0.85, 0.18], [0.85, 0.3, 0.1], [0.78, 0.62, 0.25], [1.05, 0.7, 0.15], [0.6, 0.65, 0.25]] },
+  winter: { label: 'Winter', grass: [0.95, 0.97, 1.0], snow: 1, grey: 1, thin: 0.8, verge: [1.55, 1.55, 1.65], hedge: [0.75, 0.7, 0.66],
+            palette: [[0.62, 0.57, 0.53], [0.55, 0.5, 0.47], [0.7, 0.67, 0.65]] },
+};
+const SEASON_KEY = 'golden-hour-ride-season';
+function setSeason(name) {
+  const S = SEASONS[name] || SEASONS.summer, pines = seasonal.pines;
+  uGrassTint.value.setRGB(...S.grass); uSnowCover.value = S.snow; uLeafGrey.value = pines ? 0 : S.grey;     // the valley's pines keep their needles
+  shoulderMat.color.setRGB(...S.verge);
+  if (seasonal.hedge) seasonal.hedge.material.color.setRGB(...S.hedge);
+  if (seasonal.fol) {
+    const a = seasonal.fol.instanceColor.array, base = seasonal.folBase;
+    uThin.value = pines ? 0 : S.thin || 0;                // fewer leaves in autumn, bare twigs in winter
+    for (let i = 0; i < a.length / 3; i++) {
+      const h = ((i * 2654435761) >>> 0) / 4294967296, v = 0.85 + ((i * 40503) % 97) / 97 * 0.3;   // fixed per tree
+      if (pines) { const w = S.snow ? [0.85, 0.9, 0.97] : [1, 1, 1]; a.set([base[i * 3] * w[0], base[i * 3 + 1] * w[1], base[i * 3 + 2] * w[2]], i * 3); }
+      else if (S.palette) a.set(S.palette[Math.floor(h * S.palette.length)].map(c => c * v), i * 3);
+      else if (S.blossom && h < S.blossom) a.set(h < S.blossom / 2 ? [1.6, 1.25, 1.35] : [1.6, 1.55, 1.5], i * 3);   // pink and white blossom
+      else a.set([base[i * 3], base[i * 3 + 1] * (S.blossom ? 1.05 : 1), base[i * 3 + 2]], i * 3);
+    }
+    seasonal.fol.instanceColor.needsUpdate = true;
+  }
+  $('season').value = name in SEASONS ? name : 'summer';
+  try { localStorage.setItem(SEASON_KEY, $('season').value); } catch {}
+}
+for (const [k, v] of Object.entries(SEASONS)) { const o = document.createElement('option'); o.value = k; o.textContent = 'Season: ' + v.label; $('season').append(o); }
+$('season').addEventListener('change', e => setSeason(e.target.value));
+setSeason(new URLSearchParams(location.search).get('season') || (() => { try { return localStorage.getItem(SEASON_KEY); } catch { return null; } })() || 'summer');
+EXT_WORDS.push([/\b(spring|frühling|frühjahr)\b/, 'Spring', () => setSeason('spring')], [/\b(summer|sommer)\b/, 'Summer', () => setSeason('summer')],
+  [/\b(autumn|fall|herbst)\b/, 'Autumn', () => setSeason('autumn')], [/\b(winter)\b/, 'Winter', () => setSeason('winter')]);
+
 /* ---------- add-ons (js/): web radio, news boards, oncoming traffic ---------- */
 const frameHooks = [];
 {
   const ctx = { scene, camera, P, T, R, N, LEN, at, mkPose, meshH, nearRoad, nearSide, onBridge, st, LANE, COURSE_INFO, real, rnd, $,
+    audio: () => (audio ? audio.ac : null),
     addVoice: (pattern, label, action) => EXT_WORDS.push([pattern, label, action]) };
-  for (const name of ['radio', 'news', 'traffic']) {
+  for (const name of ['radio', 'news', 'traffic', 'minimap']) {
     try { const f = await (await import(`./js/${name}.js`)).init(ctx); if (typeof f === 'function') frameHooks.push(f); }
     catch (err) { console.warn(`add-on ${name}:`, err); }
   }
+}
+
+/* ---------- a route planned in a hurry: its survey heights are built while you ride ---------- */
+if (COURSE_INFO.mine && (COURSE_INFO.quality === 'quick' || COURSE_INFO.quality === 'nomap')) {
+  const what = COURSE_INFO.quality === 'quick' ? 'Survey heights' : 'Map details';
+  const chip = document.createElement('div'); chip.id = 'refine'; document.body.append(chip);
+  chip.textContent = what + ': starting…';
+  chip.title = 'This route was built from quick terrain tiles so you could set off. The 1 m state survey is loading in the background.';
+  const w = new Worker(new URL('./js/refine-worker.js', location.href), { type: 'module' });
+  w.onmessage = e => {
+    const m = e.data;
+    if (m.total) chip.textContent = `${what}: ${m.tile} of ${m.total} squares`;
+    else if (m.log && /^(Map|Shaping|Placing)/.test(m.log)) chip.textContent = what + ': ' + m.log.replace(/…$/, '').toLowerCase() + '…';
+    else if (m.error) chip.textContent = what + ' failed: ' + m.error + ' (tried again next ride)';
+    else if (m.done) {
+      w.terminate();
+      if (m.already) { chip.remove(); return; }
+      const parts = [COURSE_INFO.quality === 'quick' && 'survey heights', m.quality !== 'nomap' && 'map details'].filter(Boolean);
+      if (!parts.length) { chip.textContent = 'Map details: the map server is busy, tried again next ride'; setTimeout(() => chip.remove(), 12000); return; }
+      chip.innerHTML = `<span>${parts.join(' and ').replace(/^./, c => c.toUpperCase())} ready${m.quality === 'nomap' ? ' (map details next ride)' : ''}</span><button class="go">Switch now</button><button>Later</button>`;
+      const [go, later] = chip.querySelectorAll('button');
+      later.onclick = () => chip.remove();     // the next ride uses them anyway
+      go.onclick = () => {
+        sessionStorage.setItem(RESUME_KEY, JSON.stringify({ course: COURSE, t: Date.now(), s: st.s, v: st.v, dist: st.dist, target: st.target, trainer: st.trainer,
+          logT: st.logRide.t, secs: st.logRide.s }));
+        location.reload();
+      };
+    }
+  };
+  w.onerror = e => { chip.textContent = what + ' could not start (' + (e.message || 'worker error') + ')'; };
+  w.postMessage({ id: COURSE });
 }
 
 function tick() {
@@ -1789,10 +1916,11 @@ function tick() {
   lens.uniforms.uTime.value = uTime.value; lens.uniforms.uRain.value = wx.rain; lens.uniforms.uPaint.value = wx.paint;
   if (audio) {
     const t = audio.ac.currentTime;
-    audio.wind.g.gain.setTargetAtTime(Math.min(0.5, st.v * st.v / 400 * 0.35), t, 0.2);
+    const rideL = soundLevel('ride');
+    audio.wind.g.gain.setTargetAtTime(Math.min(0.5, st.v * st.v / 400 * 0.35) * rideL, t, 0.2);
     audio.wind.f.frequency.setTargetAtTime(300 + st.v * 40, t, 0.2);
-    audio.tyre.g.gain.setTargetAtTime(Math.min(0.35, st.v / 15 * 0.25), t, 0.2);
-    audio.rain.g.gain.setTargetAtTime(wx.rain * 0.1, t, 0.4);
+    audio.tyre.g.gain.setTargetAtTime(Math.min(0.35, st.v / 15 * 0.25) * rideL, t, 0.2);
+    audio.rain.g.gain.setTargetAtTime(wx.rain * 0.1 * soundLevel('weather'), t, 0.4);
   }
 
   huT -= dt;

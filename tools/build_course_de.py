@@ -109,7 +109,7 @@ s_, w_ = utm_to_ll(cE - HALF, cN - HALF); n_, e_ = utm_to_ll(cE + HALF, cN + HAL
 s_, w_ = min(s_, utm_to_ll(cE + HALF, cN - HALF)[0]), min(w_, utm_to_ll(cE - HALF, cN + HALF)[1])
 n_, e_ = max(n_, utm_to_ll(cE - HALF, cN + HALF)[0]), max(e_, utm_to_ll(cE + HALF, cN - HALF)[1])
 bb = f'{s_:.5f},{w_:.5f},{n_:.5f},{e_:.5f}'
-query = f'[out:json][timeout:180];(way["building"]({bb});way["natural"="wood"]({bb});way["landuse"="forest"]({bb});relation["natural"="wood"]({bb});relation["landuse"="forest"]({bb});node["natural"="tree"]({bb});way["barrier"~"^(hedge|wall|retaining_wall)$"]({bb}););out geom;'
+query = f'[out:json][timeout:180];(way["building"]({bb});way["natural"="wood"]({bb});way["landuse"="forest"]({bb});relation["natural"="wood"]({bb});relation["landuse"="forest"]({bb});node["natural"="tree"]({bb});way["barrier"~"^(hedge|wall|retaining_wall)$"]({bb});node["place"~"^(city|town|village|suburb|hamlet)$"]({bb}););out geom;'
 def overpass(query, name):
     for k, server in enumerate(('https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter')):
         try:
@@ -301,10 +301,13 @@ def height(t):
     if b in ('garage', 'garages', 'shed', 'hut', 'carport', 'roof', 'greenhouse'): return 2.6
     return 6.5
 
-buildings, woods, holes, trees, lines = [], [], [], [], []
+buildings, woods, holes, trees, lines, places = [], [], [], [], [], []
 for e in els:
     t = e.get('tags', {})
     if e['type'] == 'node':
+        if t.get('place') and t.get('name'):          # towns and villages, for the map
+            x, z = local(e['lat'], e['lon'])
+            if inside(x, z): places.append([round(x), round(z), t['name'], t['place']])
         if t.get('natural') == 'tree':
             x, z = local(e['lat'], e['lon'])
             if inside(x, z, 20) and road_dist(x, z) > 4.5 and stub_gap(x, z) > 2: trees.append([round(x, 1), round(z, 1)])
@@ -353,7 +356,7 @@ bits = bytearray((len(mask) + 7) // 8)
 for i, v in enumerate(mask):
     if v: bits[i >> 3] |= 1 << (i & 7)
 print('buildings %d, single trees %d, hedge/wall pieces %d, woodland %.2f km2' % (len(buildings), len(trees), len(lines), sum(mask) * (size / cells) ** 2 / 1e6))
-osm = {'buildings': buildings, 'trees': trees, 'lines': lines, 'side': stubs, 'woods': base64.b64encode(bytes(bits)).decode(), 'credit': 'Buildings, woods and hedges © OpenStreetMap contributors.'}
+osm = {'buildings': buildings, 'trees': trees, 'lines': lines, 'side': stubs, 'places': places, 'woods': base64.b64encode(bytes(bits)).decode(), 'credit': 'Buildings, woods and hedges © OpenStreetMap contributors.'}
 open(f'assets/{CID}_osm.js', 'w').write(f'window.RIDE_COURSES.{CID}.osm = ' + json.dumps(osm, separators=(',', ':')) + ';\n')
 print(f'wrote assets/{CID}_osm.js', os.path.getsize(f'assets/{CID}_osm.js') // 1024, 'KB')
 

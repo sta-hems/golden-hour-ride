@@ -42,7 +42,7 @@ export async function togglePlanner({ current }) {
     <div class="row"><button id="pl-add">+ Add a place</button><label style="margin-left:auto"><input type="checkbox" id="pl-loop"> back to the start</label></div>
     <div class="row"><input type="text" id="pl-name" placeholder="Name (optional)"></div>
     <div class="row"><button class="go" id="pl-build">Build the course</button><span class="muted">Germany only · places or “lat, lon”</span></div>
-    <div class="muted" style="font-size:11px">For a round trip, give three places or more, so the way back can take other roads. Building takes a minute or two; the terrain comes in 1 km squares.</div>
+    <div class="muted" style="font-size:11px">For a round trip, give three places or more, so the way back can take other roads. You can set off within a minute: the route starts on quick terrain, and the 1 m survey heights follow while you ride.</div>
     <pre id="pl-log"></pre>
     <h3 style="margin-top:16px">Your routes</h3>
     <div id="pl-list"></div>
@@ -78,7 +78,8 @@ export async function togglePlanner({ current }) {
     $('pl-build').disabled = true; logBox.textContent = '';
     try {
       const { buildCourse } = await import('./builder.js');
-      const { id, warnings } = await buildCourse({ names, loop: $('pl-loop').checked, name: $('pl-name').value.trim() }, log);
+      const { id, warnings } = await buildCourse({ names, loop: $('pl-loop').checked, name: $('pl-name').value.trim(), quality: 'quick' }, log);
+      log('The 1 m survey heights load in the background while you ride.');
       for (const w of warnings) { const s = document.createElement('div'); s.className = 'warn'; s.textContent = '⚠ ' + w; logBox.append('\n'); logBox.append(s); }
       await drawList();
       const go = document.createElement('button'); go.className = 'go'; go.textContent = 'Ride it now'; go.style.marginTop = '8px';

@@ -9,6 +9,7 @@ const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
 const OSRM = 'https://routing.openstreetmap.de/routed-car/route/v1/driving/';
 const DGM_API = 'https://api.hoehendaten.de:14444/v1/rawtif';
 const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
+const TERRARIUM = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/';
 const STEP = 5, CELL = 10, MARGIN = 900, CORRIDOR = 1100;
 
 /* ---------- places ---------- */
@@ -86,23 +87,58 @@ async function zoneFor(lat, lon) {      // the survey offices use UTM zone 33 in
 }
 
 /* ---------- OpenStreetMap ---------- */
-async function overpass(query, log) {
-  for (const server of OVERPASS) {
+async function overpass(query, log, wait = 150000, rounds = 1) {
+  for (let round = 0; round < rounds; round++) for (const server of OVERPASS) {
     try {
-      const r = await get(server, { method: 'POST', body: new URLSearchParams({ data: query }), signal: AbortSignal.timeout(150000) });   // a stuck server: move on to the next
+      const r = await get(server, { method: 'POST', body: new URLSearchParams({ data: query }), signal: AbortSignal.timeout(wait) });   // a stuck server: move on to the next
       const j = await r.json();
       return j.elements || [];
-    } catch (err) { log(`map server ${new URL(server).host} did not answer, trying another…`); }
+    } catch (err) { log(`map server ${new URL(server).host} did not answer, trying another…`); if (server === OVERPASS[OVERPASS.length - 1] && round + 1 < rounds) await sleep(30000); }
   }
   throw new Error('OpenStreetMap (Overpass) did not answer; try again in a few minutes');
 }
 
+/* ---------- quick terrain: the open Terrarium tiles (about 6 m a pixel here; SRTM and national surveys) ---------- */
+// Good enough to ride on straight away; the survey's 1 m terrain follows in the background (see refine below).
+async function quickTerrain(minLat, minLon, maxLat, maxLon, zone, log) {
+  const Z = 14, n = 2 ** Z;
+  const tx = lon => (lon + 180) / 360 * n, ty = lat => { const r = lat * Math.PI / 180; return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n; };
+  const jobs = [], tiles = new Map();
+  for (let x = Math.floor(tx(minLon)); x <= Math.floor(tx(maxLon)); x++) for (let y = Math.floor(ty(maxLat)); y <= Math.floor(ty(minLat)); y++) jobs.push([x, y]);
+  log(`Terrain (quick preview): ${jobs.length} map tiles…`);
+  const one = async ([x, y]) => {
+    const blob = await (await get(`${TERRARIUM}${Z}/${x}/${y}.png`)).blob();
+    const bmp = await createImageBitmap(blob, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
+    const c = new OffscreenCanvas(256, 256), g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(bmp, 0, 0);
+    const px = g.getImageData(0, 0, 256, 256).data, h = new Float32Array(65536);
+    for (let k = 0; k < 65536; k++) h[k] = px[k * 4] * 256 + px[k * 4 + 1] + px[k * 4 + 2] / 256 - 32768;
+    tiles.set(x + '_' + y, h);
+  };
+  for (let k = 0; k < jobs.length; k += 8) await Promise.all(jobs.slice(k, k + 8).map(one));
+  const pix = (X, Y) => { const t = tiles.get((X >> 8) + '_' + (Y >> 8)); return t ? t[(Y & 255) * 256 + (X & 255)] : null; };
+  return {
+    tiles,
+    at(E, N) {
+      const [lat, lon] = utmToLl(E, N, zone), X = tx(lon) * 256 - 0.5, Y = ty(lat) * 256 - 0.5, x = Math.floor(X), y = Math.floor(Y), u = X - x, v = Y - y;
+      const a = pix(x, y), b = pix(x + 1, y), c = pix(x, y + 1), d = pix(x + 1, y + 1);
+      if (a === null || b === null || c === null || d === null) return null;
+      return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
+    },
+  };
+}
+
 /* ---------- the build ---------- */
-export async function buildCourse({ names, loop = true, name }, log = () => {}) {
-  const t0 = performance.now();
-  log('Finding the places…');
-  const places = [];
-  for (const n of names) { places.push(await findPlace(n)); log(`  ${n} → ${places[places.length - 1].label}`); await sleep(1100); }
+// quality 'quick': open terrain tiles, ready in a minute or less. quality 'survey': the 1 m state survey, a tile
+// every 3 seconds. A quick course is built again at survey quality in the background, under the same id.
+export async function buildCourse({ names, places: given, loop = true, name, id: keepId, quality = 'survey' }, log = () => {}, progress = () => {}) {
+  const t0 = performance.now(), quick = quality === 'quick';
+  let places = given;
+  if (!places) {
+    log('Finding the places…');
+    places = [];
+    for (const n of names) { places.push({ ...(await findPlace(n)), name: n }); log(`  ${n} → ${places[places.length - 1].label}`); await sleep(1100); }
+  }
+  names = places.map(p => p.name || p.label);
   if (places.length < 2) throw new Error('give at least two places');
 
   log('Routing along the roads…');
@@ -140,10 +176,15 @@ export async function buildCourse({ names, loop = true, name }, log = () => {}) 
         if (Math.hypot(dx, dy) < CORRIDOR) want.add(i + '_' + j);
       }
   }
-  const terrain = new Terrain(), credits = new Set(), keys = [...want];
-  log(`Terrain: ${keys.length} tiles of 1 km² from the survey…`);
+  let terrain = new Terrain();
+  const credits = new Set(), keys = [...want];
+  if (quick) {
+    const a = utmToLl(cE - HALF, cN - HALF, zone), b = utmToLl(cE + HALF, cN + HALF, zone), c = utmToLl(cE - HALF, cN + HALF, zone), d = utmToLl(cE + HALF, cN - HALF, zone);
+    terrain = await quickTerrain(Math.min(a[0], d[0]), Math.min(a[1], c[1]), Math.max(b[0], c[0]), Math.max(b[1], d[1]), zone, log);
+    credits.add('Mapzen Terrain Tiles on AWS Open Data (SRTM and national surveys)');
+  } else log(`Terrain: ${keys.length} tiles of 1 km² from the survey…`);
   let fresh = 0;
-  for (let n = 0; n < keys.length; n++) {
+  for (let n = 0; n < (quick ? 0 : keys.length); n++) {
     const [i, j] = keys[n].split('_').map(Number);
     const t = await fetchTile(zone, i, j, log);
     if (t.fresh) {
@@ -152,8 +193,9 @@ export async function buildCourse({ names, loop = true, name }, log = () => {}) 
       if (n < keys.length - 1) await sleep(3100);          // the service allows about 20 tiles a minute
     }
     if (!t.empty) { terrain.set(i, j, t); if (t.credit) t.credit.split('; ').forEach(c => credits.add(c)); }
+    progress(n + 1, keys.length);
   }
-  log(`  ${keys.length - fresh} tiles were already saved, ${fresh} downloaded`);
+  if (!quick) log(`  ${keys.length - fresh} tiles were already saved, ${fresh} downloaded`);
   if (!terrain.tiles.size) throw new Error('no terrain data for this route: is it in Germany?');
 
   // OpenStreetMap: buildings, woods, trees, hedges; and the roads, for bridges and junctions
@@ -163,11 +205,20 @@ export async function buildCourse({ names, loop = true, name }, log = () => {}) 
   const rA = utmToLl(minE - 250, minN - 250, zone), rB = utmToLl(maxE + 250, maxN + 250, zone);
   const rbb = [rA[0], rA[1], rB[0], rB[1]].map(v => v.toFixed(5)).join(',');
   log('Map: roads, bridges, buildings and woods from OpenStreetMap…');
-  let ways = [], els = [];
-  try {
-    ways = await overpass(`[out:json][timeout:120];way["highway"]["highway"!~"^(footway|path|steps|pedestrian|bridleway|corridor|elevator|proposed|construction|platform)$"](${rbb});out tags geom;`, log);
-    els = await overpass(`[out:json][timeout:180];(way["building"](${bb});way["natural"="wood"](${bb});way["landuse"="forest"](${bb});relation["natural"="wood"](${bb});relation["landuse"="forest"](${bb});node["natural"="tree"](${bb});way["barrier"~"^(hedge|wall|retaining_wall)$"](${bb}););out geom;`, log);
-  } catch (err) { warnings.push(err.message + ' – the course has no buildings, woods, bridges or side roads'); }
+  let ways = [], els = [], mapOk = false;
+  {
+    const qRoads = `[out:json][timeout:120];way["highway"]["highway"!~"^(footway|path|steps|pedestrian|bridleway|corridor|elevator|proposed|construction|platform)$"](${rbb});out tags geom;`;
+    const qMap = `[out:json][timeout:180];(way["building"](${bb});way["natural"="wood"](${bb});way["landuse"="forest"](${bb});relation["natural"="wood"](${bb});relation["landuse"="forest"](${bb});node["natural"="tree"](${bb});way["barrier"~"^(hedge|wall|retaining_wall)$"](${bb});node["place"~"^(city|town|village|suburb|hamlet)$"](${bb}););out geom;`;
+    // both at once; the quick build waits 25 s at most, and the survey build in the background fetches them again
+    const both = Promise.all([overpass(qRoads, log, quick ? 25000 : 150000, quick ? 1 : 2), overpass(qMap, log, quick ? 25000 : 150000, quick ? 1 : 2)]);
+    try {
+      [ways, els] = quick ? await Promise.race([both, sleep(26000).then(() => { throw new Error('the map server is slow'); })]) : await both;
+      mapOk = true;
+    } catch (err) {
+      both.catch(() => {});
+      warnings.push(err.message + (quick ? ' – buildings, woods, bridges and side roads come with the survey heights' : ' – the course has no buildings, woods, bridges or side roads'));
+    }
+  }
 
   // road heights from the survey: the flattest point across the road
   const hts = line.map(([E, N], k) => {
@@ -326,10 +377,11 @@ export async function buildCourse({ names, loop = true, name }, log = () => {}) 
     if (['garage', 'garages', 'shed', 'hut', 'carport', 'roof', 'greenhouse'].includes(t.building)) return 2.6;
     return 6.5;
   };
-  const buildings = [], woods = [], holes = [], trees = [], lines = [];
+  const buildings = [], woods = [], holes = [], trees = [], lines = [], places = [];
   for (const e of els) {
     const t = e.tags || {};
     if (e.type === 'node') {
+      if (t.place && t.name) { const [x, z] = local(e.lat, e.lon); if (inside(x, z)) places.push([+x.toFixed(0), +z.toFixed(0), t.name, t.place]); }   // towns and villages, for the map
       if (t.natural === 'tree') { const [x, z] = local(e.lat, e.lon); if (inside(x, z, 20) && roadDist(x, z) > 4.5 && stubGap(x, z) > 2) trees.push([+x.toFixed(1), +z.toFixed(1)]); }
       continue;
     }
@@ -377,13 +429,16 @@ export async function buildCourse({ names, loop = true, name }, log = () => {}) 
   const title = name || (names.length > 1 ? `${names[0]} – ${names.slice(1, loop ? undefined : -1).join(' – ')}${loop ? ' loop' : ` – ${names[names.length - 1]}`}` : names[0]);
   const course = {
     name: title, size, cells, origin: [cE, cN], zone, demMin: lo, demMax: hi, road, bridges,
-    credit: `Route © OpenStreetMap contributors. Heights: DGM1 via hoehendaten.de; ${[...credits].join('; ')}.`,
+    credit: `Route © OpenStreetMap contributors. Heights: ${quick ? 'preview from ' : 'DGM1 via hoehendaten.de; '}${[...credits].join('; ')}.`,
     dem: bytesToB64(new Uint8Array(q.buffer)),
   };
-  const osm = { buildings, trees, lines, side, woods: bytesToB64(bits), credit: 'Buildings, woods and hedges © OpenStreetMap contributors.' };
-  const id = 'my-' + Date.now().toString(36);
+  const osm = { buildings, trees, lines, side, places, woods: bytesToB64(bits), credit: 'Buildings, woods and hedges © OpenStreetMap contributors.' };
+  const id = keepId || 'my-' + Date.now().toString(36), old = keepId ? await store.getCourse(keepId).catch(() => null) : null;
   const km = +(line.length * STEP / 1000).toFixed(1);
-  await store.putCourse({ id, info: { id, name: title, short: title, km, climb: Math.round(climb), start: 0, drive: 'right' }, places: names, loop, fav: false, created: Date.now(), course, osm });
+  if (old) course.name = old.info.name;
+  const saved = quality === 'survey' && !mapOk ? 'nomap' : quality;      // 'nomap': survey heights, but the map server failed; fetched again next time
+  await store.putCourse({ id, info: { id, name: old ? old.info.name : title, short: old ? old.info.short : title, km, climb: Math.round(climb), start: 0, drive: 'right', quality: saved },
+    places: names, resolved: places, loop, fav: old ? old.fav : false, created: old ? old.created : Date.now(), course, osm });
   log(`Done in ${Math.round((performance.now() - t0) / 1000)} s: ${km} km, ${Math.round(climb)} m of climbing.`);
-  return { id, warnings };
+  return { id, warnings, quality: saved };
 }

@@ -8,6 +8,8 @@ Live: https://golden-hour-ride.space.fast/ · Leckhampton loop: https://golden-h
 
 - A choice of courses from the Course menu: an invented mountain valley, a real 11.9 km Leckhampton loop built from Environment Agency lidar, dressed as the 19th-century hill (sheep, hay stooks, quarry smoke), and real roads in Germany built from the states' 1 m terrain survey (see below).
 - Four looks: Golden, Overcast, Rain and Mist. Buttons at the top, keys 1–4, or by voice.
+- Four seasons from the Season menu, or by voice (“spring”, “Herbst”, …): spring green with trees in blossom, summer, autumn colours with the leaves thinning, and winter with snow on the ground and bare trees. The choice is kept in the browser; `?season=winter` sets it for one visit.
+- A small map of the course in the top left corner, with the towns and villages, the cars, and the height profile; click it for a bigger one.
 - Skip forward and back 250 m with the arrow keys.
 - Hide everything on screen for a clean view: the Hide info button, the H key, or say "hide". Press H, click, or say "show" to bring it back.
 - Power from a slider, or from a Bluetooth trainer (Chrome or Edge). If the trainer supports resistance control (FTMS), the ride also sends it the road gradient, so climbs feel harder; the button shows "Trainer: power and gradient" or "Trainer: power only". The trainer feels half the road gradient by default; the − and + buttons beside the trainer button change that in steps of 10 %, from off to the full gradient, and the choice is kept in the browser (`?hills=` sets it for one visit). With voice on, say "easier" or "harder" to move it by 20 %, "flat" for off, or "full" for all of it. The last trainer is remembered: the button reads "Reconnect trainer" and rejoins it without the browser's device list where Chrome allows that, and a dropped connection is retried automatically.
@@ -34,13 +36,14 @@ The first German course is a 5.2 km loop just west of Idstein in the Taunus: the
 
 ## Plan your own route
 
-Press **Routes** in the ride, type a start and one or more places to ride by (towns, villages, addresses, or “lat, lon”), tick *back to the start* for a round trip, and press **Build the course**. The page finds the places (OpenStreetMap Nominatim), routes along the roads (OSRM), fetches the terrain tiles from hoehendaten.de, takes bridges, side roads, buildings and woods from OpenStreetMap, and keeps the finished course in the browser (IndexedDB), with the terrain tiles, so routes nearby build faster. Mark favourites with ★: they come first in the course menu. Germany only, as the terrain is the German state surveys. The code is in `js/` (`builder.js` does what `tools/build_course_de.py` does, in the browser).
+Press **Routes** in the ride, type a start and one or more places to ride by (towns, villages, addresses, or “lat, lon”), tick *back to the start* for a round trip, and press **Build the course**. The page finds the places (OpenStreetMap Nominatim), routes along the roads (OSRM), fetches the terrain tiles from hoehendaten.de, takes bridges, side roads, buildings and woods from OpenStreetMap, and keeps the finished course in the browser (IndexedDB), with the terrain tiles, so routes nearby build faster. You can set off within about half a minute: the course is first built from the open Terrarium terrain tiles, and a background worker then builds it again from the 1 m survey (a tile every 3 seconds, as the service allows) while you ride. When that is done, *Switch now* reloads the course at the spot you have reached, in the same ride; otherwise the next ride uses it. Mark favourites with ★: they come first in the course menu. Germany only, as the terrain is the German state surveys. The code is in `js/` (`builder.js` does what `tools/build_course_de.py` does, in the browser).
 
 ## Radio, news boards and traffic
 
 - **Radio**: SWR3, hr3, BBC Radio 1, 2 and 3. The button steps through them; or say the station's name, “radio off”, “louder”, “quieter”.
 - **News**: boards beside the road every 1 to 1.5 km with the latest headlines from tagesschau.de and hessenschau.de (BBC News on British courses). The News button turns them off.
-- **Traffic**: a few cars coming the other way. The Traffic button turns them off.
+- **Traffic**: a few cars, about one for every 1.5 km, both ways, with the soft hum of an electric car and the hiss of their tyres. They slow for bends (braking before them, not in them). A car coming up behind waits well back until the other lane is clear for 320 m and no tight bend is coming, then passes with more than 2 m to spare and pulls in again 20 m ahead. The Traffic button turns them off.
+- **Sound**: a mixer for everything you hear (wind and tyres, rain, traffic, radio). While the radio plays, wind and tyres drop back on their own; untick that in the mixer, or turn them right down.
 - **Voice** listens in German on German courses and in English on British ones; both sets of words work (“Regen”, “Nebel”, “Sonne”, “weiter”, “zurück”, “leichter”, “schwerer”, …).
 
 ## Run it locally

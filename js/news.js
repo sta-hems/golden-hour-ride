@@ -85,16 +85,18 @@ export async function init(ctx) {
     const b = new THREE.Group();
     b.position.set(x, y, z); b.rotation.y = Math.atan2(face.x, face.z);
     const canvas = document.createElement('canvas'); canvas.width = 1024; canvas.height = 640;
-    const tex = new THREE.CanvasTexture(canvas); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
-    const panelMat = new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.16, roughness: 0.85 });
-    const panel = new THREE.Mesh(new THREE.PlaneGeometry(BW, BH), panelMat); panel.position.set(0, LIFT + BH / 2, 0.07);
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(BW + 0.2, BH + 0.2, 0.12), frameMat); frame.position.set(0, LIFT + BH / 2, 0);
+    const tex = new THREE.CanvasTexture(canvas); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 16; tex.generateMipmaps = true; tex.minFilter = THREE.LinearMipmapLinearFilter;
+    // the poster sits 5 cm proud of the frame and is pulled forward in the depth test, so the two never fight (that flickered)
+    const panelMat = new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.16, roughness: 0.85,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+    const panel = new THREE.Mesh(new THREE.PlaneGeometry(BW, BH), panelMat); panel.position.set(0, LIFT + BH / 2, 0.03);
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(BW + 0.2, BH + 0.2, 0.12), frameMat); frame.position.set(0, LIFT + BH / 2, -0.08);
     b.add(panel, frame);
     for (const px of [-BW / 2 + 0.5, BW / 2 - 0.5]) {
       const post = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, LIFT + BH + 0.6, 10), postMat);
-      post.position.set(px, (LIFT + BH + 0.6) / 2 - 0.6, -0.12); b.add(post);
+      post.position.set(px, (LIFT + BH + 0.6) / 2 - 0.6, -0.22); b.add(post);
     }
-    b.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+    b.traverse(m => { if (m.isMesh && m !== panel) { m.castShadow = true; m.receiveShadow = true; } });     // no shadow speckle on the poster itself
     group.add(b);
     boards.push({ canvas, tex, s: i * LEN / N });
   }

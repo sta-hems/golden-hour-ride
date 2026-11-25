@@ -8,6 +8,7 @@ const STATIONS = [
   { id: 'bbc3', name: 'BBC Radio 3', hls: true, url: 'https://as-hls-ww-live.akamaized.net/pool_23461179/live/ww/bbc_radio_three/bbc_radio_three.isml/bbc_radio_three-audio%3d96000.norewind.m3u8', say: /\b(radio (3|three|drei)|bbc (3|three|drei))\b/ },
 ];
 const KEY = 'golden-hour-ride-radio';
+import { sound, set, level, onChange } from './sound.js';
 
 export function init(ctx) {
   const uk = ctx.COURSE_INFO.drive === 'left';
@@ -16,8 +17,9 @@ export function init(ctx) {
   btn.title = 'Web radio: click to step through the stations. Voice: “SWR3”, “hr3”, “BBC Radio 1/2/3”, “radio off”, “louder”, “quieter”';
   ctx.$('voice').after(btn);
   const audio = new Audio(); audio.preload = 'none';
-  let current = null, hls = null, volume = +(localStorage.getItem(KEY + '-vol') || 0.7);
-  audio.volume = volume;
+  let current = null, hls = null;
+  const apply = () => { audio.volume = Math.min(1, level('radio')); };      // the mixer sets the level
+  onChange(apply); apply();
   const label = (t) => { btn.textContent = 'Radio: ' + (t || (current ? current.name : 'off')); btn.classList.toggle('on', !!current); };
 
   async function play(st) {
@@ -30,16 +32,16 @@ export function init(ctx) {
         hls = new window.Hls({ lowLatencyMode: false }); hls.loadSource(st.url); hls.attachMedia(audio);
       } else audio.src = st.url;
       await audio.play();
-      if (current === st) label();
+      if (current === st) { label(); set('radioOn', true); }
     } catch (err) { if (current === st) { label('no signal'); current = null; } }
   }
   function stop(save = true) {
     if (hls) { hls.destroy(); hls = null; }
     audio.pause(); audio.removeAttribute('src'); audio.load();
-    current = null; label();
+    current = null; label(); set('radioOn', false);
     if (save) localStorage.setItem(KEY, 'off');
   }
-  const vol = d => { volume = Math.max(0.05, Math.min(1, volume + d)); audio.volume = volume; localStorage.setItem(KEY + '-vol', volume); label(`${current ? current.name : 'off'} · ${Math.round(volume * 100)} %`); setTimeout(() => label(), 1800); };
+  const vol = d => { set('radio', Math.max(0.05, Math.min(1, sound.radio + d))); label(`${current ? current.name : 'off'} · ${Math.round(sound.radio * 100)} %`); setTimeout(() => label(), 1800); };
 
   btn.onclick = () => {
     const i = current ? order.indexOf(current) : -1;
