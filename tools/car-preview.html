@@ -16,6 +16,14 @@ cam.position.set(...({ '3q': [7, 2.2, 9], side: [11, 1.2, 0], front: [0, 1.4, 11
 scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x6b5a3a, 1.2)); const sun = new THREE.DirectionalLight(0xfff0d8, 2.5); sun.position.set(5, 8, 6); scene.add(sun);
 scene.add(new THREE.Mesh(new THREE.PlaneGeometry(40, 40).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x3a3c40 })));
 const mats = await import('../js/traffic.js').then(m => m.materials());
+// the real models from assets/cars/cars.json, if any (?built shows the lofted ones instead); the blue arrow points where the nose should
+const models = new URLSearchParams(location.search).has('built') ? [] : await import('../js/traffic.js').then(m => { const keep = location.pathname; return m.loadModels.call(null); }).catch(() => []);
+if (models.length) {
+  models.forEach(({ model }, n) => { model.position.set((n - (models.length - 1) / 2) * 2.6, 0, (n % 2) * 1.2); scene.add(model);
+    scene.add(new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(model.position.x, 2.2, model.position.z), 1.6, 0x2266ff)); });
+  cam.position.multiplyScalar(1.5); cam.lookAt(0, 0.7, 0);
+  const loop = () => { r.render(scene, cam); requestAnimationFrame(loop); }; loop();
+} else
 Object.keys(STYLES).forEach((k, n) => {
   const parts = buildStyle(STYLES[k]), car = new THREE.Group();
   const paint = new THREE.MeshPhysicalMaterial({ color: PAINTS[n * 2], metalness: 0.55, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.08 });

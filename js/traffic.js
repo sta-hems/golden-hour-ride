@@ -1,9 +1,48 @@
 // Oncoming traffic: a few cars on the other side of the road, coming towards the rider. Three body styles
-// (hatchback, saloon, estate), lofted from rounded cross-sections, in a handful of paint colours.
+// (hatchback, saloon, estate) built from rounded side profiles, in a handful of paint colours, unless real models are given.
 // The Traffic button turns them off and on (remembered).
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { level } from './sound.js';
+
+// Real car models, if there are any: listed in assets/cars/cars.json as
+//   { "cars": [ { "file": "milano/scene.gltf", "title": "Milano '95", "author": "…", "license": "CC BY 4.0", "url": "…",
+//                 "length": 4.2, "rotate": 0 } ] }
+// Each is scaled to its real length, turned nose-first (rotate: degrees, when the model faces another way), set on the
+// ground, and credited on screen. Models that aren't there are skipped; with none, the cars built below are used.
+export async function loadModels() {
+  let list;
+  const dir = new URL('../assets/cars/', import.meta.url);           // wherever the page is, the models sit beside js/
+  try { const r = await fetch(new URL('cars.json', dir), { cache: 'no-cache' }); if (!r.ok) return []; list = (await r.json()).cars || []; } catch { return []; }
+  const loader = new GLTFLoader(), out = [];
+  for (const c of list) {
+    const url = new URL(c.file, dir).href;
+    try { if (!(await fetch(url, { method: 'HEAD' })).ok) continue; }    // not downloaded: skip it quietly
+    catch { continue; }
+    try { out.push({ model: fit((await loader.loadAsync(url)).scene, c), info: c }); }
+    catch (err) { console.warn('car model', c.file, err); }
+  }
+  return out;
+}
+// the car's own extent: badges and number plates are left out, as some models keep spare ones far from the car
+function measure(scene, box) {
+  box.makeEmpty();
+  scene.traverse(m => { if (m.isMesh && !/badge|plate|decal/i.test(m.name + ' ' + (m.material && m.material.name))) box.expandByObject(m); });
+  return box;
+}
+function fit(scene, c) {
+  const holder = new THREE.Group(), box = new THREE.Box3(), size = new THREE.Vector3(), mid = new THREE.Vector3();
+  scene.rotation.y = (c.rotate || 0) * Math.PI / 180;
+  scene.updateMatrixWorld(true); measure(scene, box).getSize(size);
+  if (size.x > size.z) { scene.rotation.y += Math.PI / 2; scene.updateMatrixWorld(true); measure(scene, box).getSize(size); }   // lying across: turn it lengthways first, then by rotate
+  scene.scale.multiplyScalar((c.length || 4.4) / size.z);
+  scene.updateMatrixWorld(true); measure(scene, box).getCenter(mid);
+  scene.position.set(-mid.x, -box.min.y, -mid.z);                       // centred, wheels on the ground
+  scene.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+  holder.add(scene);
+  return holder;
+}
 
 // the sound of a passing electric car: the soft two-note hum their pedestrian-warning speakers make,
 // and the hiss of tyres on tarmac. Pitch follows the speed, with a little Doppler as it goes by.
@@ -33,94 +72,68 @@ function carVoice(ac) {
 const KEY = 'golden-hour-ride-traffic';
 export const PAINTS = [0x1d3d6e, 0x9a1b1f, 0xd9dcdf, 0x2b2e33, 0x6f7479, 0x0f4d3c, 0xe6e2d6, 0x3a5f8a];
 
-// Each car is lofted: rounded cross-sections at many points from tail to nose, so the body is curved every way
-// (in plan, in elevation and across), not a side view pushed out sideways. x runs from the tail (0) to the nose (len).
-//   top:  the body's upper line: boot, belt, bonnet           roof: the cabin's roof line, from rear window to windscreen
+// The cars used when no models are given (assets/cars/cars.json): side profiles, x from the tail (0) to the nose (len), y up,
+// pushed out to the car's width with rounded edges; wheels sit at rear and front
 export const STYLES = {
-  hatch: { len: 4.08, wid: 1.78, rear: 0.76, front: 3.34, plan: 5,
-    top: [[0, 0.62], [0.06, 0.9], [0.3, 0.98], [1.2, 0.99], [2.75, 0.97], [3.2, 0.92], [3.75, 0.82], [4.02, 0.68], [4.08, 0.5]],
-    roof: [[0.1, 0.98], [0.28, 1.3], [0.62, 1.45], [1.95, 1.47], [2.75, 0.97]] },
-  saloon: { len: 4.72, wid: 1.82, rear: 0.98, front: 3.78, plan: 5.5,
-    top: [[0, 0.62], [0.05, 0.92], [0.35, 1.0], [0.8, 1.02], [3.3, 0.98], [3.75, 0.92], [4.35, 0.82], [4.66, 0.66], [4.72, 0.5]],
-    roof: [[0.8, 1.01], [1.25, 1.33], [1.7, 1.43], [2.6, 1.44], [3.3, 0.98]] },
-  estate: { len: 4.78, wid: 1.84, rear: 0.98, front: 3.82, plan: 5.5,
-    top: [[0, 0.62], [0.05, 0.94], [0.3, 1.02], [1.5, 1.02], [3.35, 1.0], [3.8, 0.94], [4.4, 0.84], [4.72, 0.68], [4.78, 0.5]],
-    roof: [[0.1, 1.02], [0.18, 1.4], [0.45, 1.5], [2.65, 1.51], [3.35, 1.0]] },
+  hatch: { len: 4.08, wid: 1.76, rear: 0.78, front: 3.33, body: [[0, 0.42], [0.02, 0.9], [0.22, 0.99], [2.9, 0.95], [3.8, 0.8], [4.08, 0.58], [4.05, 0.27]],
+           glass: [[0.12, 0.99], [0.5, 1.44], [2.05, 1.45], [2.9, 0.95]] },
+  saloon: { len: 4.7, wid: 1.82, rear: 0.95, front: 3.75, body: [[0, 0.44], [0.03, 0.97], [0.75, 1.02], [3.35, 0.96], [4.35, 0.8], [4.7, 0.58], [4.66, 0.27]],
+            glass: [[0.75, 1.02], [1.3, 1.42], [2.55, 1.44], [3.35, 0.96]] },
+  estate: { len: 4.75, wid: 1.84, rear: 0.95, front: 3.8, body: [[0, 0.45], [0.02, 1.0], [0.2, 1.03], [3.4, 0.98], [4.4, 0.82], [4.75, 0.6], [4.71, 0.28]],
+            glass: [[0.1, 1.03], [0.3, 1.5], [2.6, 1.52], [3.4, 0.98]] },
 };
 const WHEEL_R = 0.33;
 
-function profile(pts) {                 // a smooth line through the points, as y for a given x
-  const s = new THREE.SplineCurve(pts.map(p => new THREE.Vector2(p[0], p[1]))).getPoints(300);
-  return x => {
-    if (x <= s[0].x) return s[0].y;
-    for (let i = 1; i < s.length; i++) if (s[i].x >= x) { const a = s[i - 1], b = s[i], t = (x - a.x) / (b.x - a.x || 1); return a.y + (b.y - a.y) * t; }
-    return s[s.length - 1].y;
-  };
-}
-
-// a closed surface through superellipse cross-sections; sec(x) gives bottom, top, half width, squareness and tumblehome
-function loft(x0, x1, M, sec, K = 36) {
-  const pos = [], idx = [], ends = [];
-  for (let i = 0; i <= M; i++) {
-    const u = i / M, x = x0 + (x1 - x0) * (0.5 - 0.5 * Math.cos(Math.PI * u));      // closer stations at the ends, where it curves most
-    const { yb, yt, hw, n, tumble } = sec(x), yc = (yb + yt) / 2, hy = Math.max(2e-3, (yt - yb) / 2), m = 2 / n;
-    for (let k = 0; k < K; k++) {
-      const th = k / K * Math.PI * 2, c = Math.cos(th), sn = Math.sin(th);
-      const y = yc + hy * Math.sign(sn) * Math.abs(sn) ** m, up = Math.max(0, (y - yc) / hy);
-      pos.push(x, y, Math.max(2e-3, hw) * Math.sign(c) * Math.abs(c) ** m * (1 - tumble * up * up));
-    }
-    if (i === 0 || i === M) ends.push([x, yc]);
-  }
-  for (let i = 0; i < M; i++) for (let k = 0; k < K; k++) {
-    const a = i * K + k, b = i * K + (k + 1) % K;
-    idx.push(a, b, a + K, b, b + K, a + K);
-  }
-  const c0 = pos.length / 3; pos.push(ends[0][0], ends[0][1], 0); const c1 = c0 + 1; pos.push(ends[1][0], ends[1][1], 0);
-  for (let k = 0; k < K; k++) { idx.push(c0, (k + 1) % K, k); idx.push(c1, M * K + k, M * K + (k + 1) % K); }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+function extrude(shape, width, bevel = 0.06) {
+  const g = new THREE.ExtrudeGeometry(shape, { depth: width - 2 * bevel, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 4, curveSegments: 14 });
+  g.translate(0, 0, -(width - 2 * bevel) / 2);
   return g;
 }
 
-const blob = (rx, ry, rz) => new THREE.SphereGeometry(1, 18, 12).scale(rx, ry, rz);     // lamps, mirrors, grille: rounded, not boxes
-
 export function buildStyle(st) {
-  const { len, wid, rear, front, plan } = st, top = profile(st.top), roofY = profile(st.roof), W2 = wid / 2;
-  const hw = x => { const u = Math.min(1, Math.abs(x - len / 2) / (len / 2)); return W2 * Math.pow(Math.max(0, 1 - u ** plan), 1 / plan); };   // rounded in plan
-  const bottom = x => {                                  // the sills, rising into an arch over each wheel and up at the bumpers
-    let y = 0.3;
-    for (const w of [rear, front]) { const d = Math.abs(x - w), r = WHEEL_R + 0.07; if (d < r) y = Math.max(y, WHEEL_R + Math.sqrt(r * r - d * d) * 0.92); }
-    const e = Math.min(x, len - x); if (e < 0.3) y = Math.max(y, 0.3 + (0.3 - e) * 0.55);
-    return y;
-  };
-  const body = loft(0, len, 72, x => ({ yb: bottom(x), yt: top(x), hw: hw(x), n: 4.6, tumble: 0.08 }));
-  const r0 = st.roof[0][0], r1 = st.roof[st.roof.length - 1][0];
-  const glass = loft(r0, r1, 44, x => ({ yb: top(x) - 0.06, yt: roofY(x), hw: hw(x) * 0.75, n: 4.6, tumble: 0.2 }), 32);     // narrower than the shoulders, so it sits on them
-  const f0 = st.roof[2][0] - 0.04, f1 = st.roof[3][0] + 0.06;          // the roof panel over the glass, in the paint
-  const roof = loft(f0, f1, 30, x => { const y = roofY(x), e = Math.min(x - f0, f1 - x), t = Math.min(1, e / 0.25);
-    return { yb: y - 0.06 * t, yt: y + 0.016 * t, hw: hw(x) * 0.75 * (1 - 0.2) * 0.97, n: 5, tumble: 0.02 }; }, 32);
-  const paint = [body, roof];
-  const nx = len - 0.2, ny = top(nx) - 0.1, tx = 0.16, ty = top(tx) - 0.14;
-  const trim = [blob(0.05, 0.05, hw(len - 0.1) * 0.5).translate(len - 0.07, ny - 0.13, 0),           // grille, set into the nose
-                blob(0.06, 0.045, hw(len - 0.08) * 0.8).translate(len - 0.07, 0.37, 0),             // the dark lower bumper
-                blob(0.06, 0.045, hw(0.08) * 0.8).translate(0.07, 0.39, 0)];
+  const { len, wid, rear, front, body, glass } = st, r = WHEEL_R + 0.06, y0 = 0.27;
+  const s = new THREE.Shape();                          // the lower body, with arches over the wheels
+  s.moveTo(0.06, y0);
+  s.lineTo(rear - r, y0); s.absarc(rear, WHEEL_R, r, Math.PI, 0, true);
+  s.lineTo(front - r, y0); s.absarc(front, WHEEL_R, r, Math.PI, 0, true);
+  s.lineTo(body[6][0], body[6][1]);
+  s.quadraticCurveTo(len + 0.02, (body[5][1] + body[6][1]) / 2, body[5][0], body[5][1]);
+  s.quadraticCurveTo(len - 0.05, body[4][1] + 0.02, body[4][0], body[4][1]);
+  s.lineTo(body[3][0], body[3][1]); s.lineTo(body[2][0], body[2][1]);
+  s.quadraticCurveTo(body[1][0], body[2][1], body[1][0], body[1][1]);
+  s.lineTo(body[0][0], body[0][1]); s.lineTo(0.06, y0);
+  const paint = [extrude(s, wid, 0.07)];
+  const gs = new THREE.Shape(); gs.moveTo(...glass[0]); glass.slice(1).forEach(p => gs.lineTo(...p)); gs.lineTo(...glass[0]);
+  const glassGeo = extrude(gs, wid - 0.16, 0.05);
+  const roof = new THREE.Shape();                       // a roof panel over the glass, so it reads as a car and not a bubble
+  roof.moveTo(glass[1][0] + 0.05, glass[1][1] - 0.03); roof.lineTo(glass[2][0] - 0.05, glass[2][1] - 0.03);
+  roof.lineTo(glass[2][0] - 0.12, glass[2][1] + 0.03); roof.lineTo(glass[1][0] + 0.1, glass[1][1] + 0.03);
+  paint.push(extrude(roof, wid - 0.2, 0.04));
+  for (const z of [-1, 1]) {                            // the pillars between the windows
+    const pil = new THREE.BoxGeometry(0.09, 0.42, 0.05);
+    const mx = (glass[1][0] + glass[2][0]) / 2; pil.translate(mx - 0.25, (glass[1][1] + body[2][1]) / 2 + 0.03, z * (wid / 2 - 0.1));
+    paint.push(pil);
+  }
+  const body3 = mergeGeometries(paint.map(g => g.toNonIndexed()));
+  const fy = body[5][1];                                 // the front face, just under the bonnet's leading edge
+  const trim = [new THREE.BoxGeometry(0.14, 0.2, wid * 0.46).translate(len + 0.02, fy - 0.12, 0),       // grille
+                new THREE.BoxGeometry(0.16, 0.13, wid - 0.1).translate(len + 0.0, 0.33, 0),          // front bumper, black lower part
+                new THREE.BoxGeometry(0.14, 0.14, wid - 0.1).translate(0.0, 0.36, 0),                // rear bumper
+                new THREE.BoxGeometry(len - 1.7, 0.07, wid + 0.02).translate(len / 2, 0.37, 0)];    // sills
+  for (const z of [-1, 1]) trim.push(new THREE.BoxGeometry(0.2, 0.11, 0.16).translate(glass[3][0] - 0.12, body[3][1] + 0.06, z * (wid / 2 + 0.06)));   // mirrors
   const head = [], tail = [];
   for (const z of [-1, 1]) {
-    head.push(blob(0.07, 0.045, 0.19).translate(nx + 0.06, ny, z * (hw(nx) - 0.27)));
-    tail.push(blob(0.06, 0.055, 0.18).translate(tx - 0.08, ty, z * (hw(tx) - 0.25)));
-    const mx = st.roof[st.roof.length - 1][0] - 0.12;                                                // mirrors
-    trim.push(blob(0.07, 0.055, 0.09).translate(mx, top(mx) + 0.07, z * (hw(mx) * 0.78 + 0.07)));
+    head.push(new THREE.BoxGeometry(0.14, 0.13, 0.42).translate(len - 0.01, fy + 0.02, z * (wid / 2 - 0.32)));
+    tail.push(new THREE.BoxGeometry(0.12, 0.16, 0.38).translate(0.0, body[1][1] - 0.16, z * (wid / 2 - 0.27)));
   }
-  const tyre = new THREE.CylinderGeometry(WHEEL_R, WHEEL_R, 0.22, 28).rotateX(Math.PI / 2);
-  const rim = new THREE.CylinderGeometry(WHEEL_R * 0.64, WHEEL_R * 0.6, 0.235, 16).rotateX(Math.PI / 2);
+  const tyre = new THREE.CylinderGeometry(WHEEL_R, WHEEL_R, 0.22, 22).rotateX(Math.PI / 2);
+  const rim = new THREE.CylinderGeometry(WHEEL_R * 0.62, WHEEL_R * 0.62, 0.235, 12).rotateX(Math.PI / 2);
   const tyres = [], rims = [];
   for (const x of [rear, front]) for (const z of [-1, 1]) {
-    const zz = z * (hw(x) - 0.14);
-    tyres.push(tyre.clone().translate(x, WHEEL_R, zz)); rims.push(rim.clone().translate(x, WHEEL_R, zz + z * 0.005));
+    tyres.push(tyre.clone().translate(x, WHEEL_R, z * (wid / 2 - 0.13)));
+    rims.push(rim.clone().translate(x, WHEEL_R, z * (wid / 2 - 0.12)));
   }
-  const plain = g => { const h = g.index ? g.toNonIndexed() : g; h.deleteAttribute('uv'); return h; };     // the lofts carry no texture coordinates
-  const parts = { body: mergeGeometries(paint.map(plain)), glass, trim: mergeGeometries(trim), head: mergeGeometries(head),
-                  tail: mergeGeometries(tail), tyre: mergeGeometries(tyres), rim: mergeGeometries(rims) };
+  const parts = { body: body3, glass: glassGeo, trim: mergeGeometries(trim), head: mergeGeometries(head), tail: mergeGeometries(tail), tyre: mergeGeometries(tyres), rim: mergeGeometries(rims) };
   for (const g of Object.values(parts)) { g.translate(-len / 2, 0, 0); g.rotateY(-Math.PI / 2); }   // nose toward +z
   return parts;
 }
@@ -179,6 +192,12 @@ export function init(ctx) {
   const fwd = (a, b) => (((b - a) % LEN) + LEN) % LEN;                    // how far b is ahead of a, along the ride
 
   ctx.st.cars = cars;                                    // for checking
+  loadModels().then(models => {                          // swap in the real models once they have loaded
+    if (!models.length) return;
+    cars.forEach((c, n) => { const m = models[n % models.length].model.clone(true); c.car.clear(); c.car.add(m); });
+    const credit = ctx.$('credit'), names = models.map(({ info: i }) => `${i.title}${i.author ? ' by ' + i.author : ''}${i.license ? ' (' + i.license + ')' : ''}`);
+    if (credit) credit.textContent += ' Cars: ' + names.join(', ') + '.';
+  });
   const pose = mkPose(), front = mkPose(), aim = new THREE.Vector3(), rel = new THREE.Vector3();
   const hush = () => { for (const c of cars) if (c.voice) c.voice.out.gain.setTargetAtTime(0, c.voice.out.context.currentTime, 0.1); };
   btn.addEventListener('click', () => { if (!on) hush(); });

@@ -377,11 +377,11 @@ export async function buildCourse({ names, places: given, loop = true, name, id:
     if (['garage', 'garages', 'shed', 'hut', 'carport', 'roof', 'greenhouse'].includes(t.building)) return 2.6;
     return 6.5;
   };
-  const buildings = [], woods = [], holes = [], trees = [], lines = [], places = [];
+  const buildings = [], woods = [], holes = [], trees = [], lines = [], towns = [];
   for (const e of els) {
     const t = e.tags || {};
     if (e.type === 'node') {
-      if (t.place && t.name) { const [x, z] = local(e.lat, e.lon); if (inside(x, z)) places.push([+x.toFixed(0), +z.toFixed(0), t.name, t.place]); }   // towns and villages, for the map
+      if (t.place && t.name) { const [x, z] = local(e.lat, e.lon); if (inside(x, z)) towns.push([+x.toFixed(0), +z.toFixed(0), t.name, t.place]); }   // towns and villages, for the map
       if (t.natural === 'tree') { const [x, z] = local(e.lat, e.lon); if (inside(x, z, 20) && roadDist(x, z) > 4.5 && stubGap(x, z) > 2) trees.push([+x.toFixed(1), +z.toFixed(1)]); }
       continue;
     }
@@ -432,7 +432,7 @@ export async function buildCourse({ names, places: given, loop = true, name, id:
     credit: `Route © OpenStreetMap contributors. Heights: ${quick ? 'preview from ' : 'DGM1 via hoehendaten.de; '}${[...credits].join('; ')}.`,
     dem: bytesToB64(new Uint8Array(q.buffer)),
   };
-  const osm = { buildings, trees, lines, side, places, woods: bytesToB64(bits), credit: 'Buildings, woods and hedges © OpenStreetMap contributors.' };
+  const osm = { buildings, trees, lines, side, places: towns, woods: bytesToB64(bits), credit: 'Buildings, woods and hedges © OpenStreetMap contributors.' };
   const id = keepId || 'my-' + Date.now().toString(36), old = keepId ? await store.getCourse(keepId).catch(() => null) : null;
   const km = +(line.length * STEP / 1000).toFixed(1);
   if (old) course.name = old.info.name;

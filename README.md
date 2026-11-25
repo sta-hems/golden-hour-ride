@@ -42,9 +42,19 @@ Press **Routes** in the ride, type a start and one or more places to ride by (to
 
 - **Radio**: SWR3, hr3, BBC Radio 1, 2 and 3. The button steps through them; or say the station's name, “radio off”, “louder”, “quieter”.
 - **News**: boards beside the road every 1 to 1.5 km with the latest headlines from tagesschau.de and hessenschau.de (BBC News on British courses). The News button turns them off.
-- **Traffic**: a few cars, about one for every 1.5 km, both ways, with the soft hum of an electric car and the hiss of their tyres. They slow for bends (braking before them, not in them). A car coming up behind waits well back until the other lane is clear for 320 m and no tight bend is coming, then passes with more than 2 m to spare and pulls in again 20 m ahead. The Traffic button turns them off.
+- **Traffic**: a few cars, about one for every 1.5 km, both ways (real models if you add them, see below), with the soft hum of an electric car and the hiss of their tyres. They slow for bends (braking before them, not in them). A car coming up behind waits well back until the other lane is clear for 320 m and no tight bend is coming, then passes with more than 2 m to spare and pulls in again 20 m ahead. The Traffic button turns them off.
 - **Sound**: a mixer for everything you hear (wind and tyres, rain, traffic, radio). While the radio plays, wind and tyres drop back on their own; untick that in the mixer, or turn them right down.
 - **Voice** listens in German on German courses and in English on British ones; both sets of words work (“Regen”, “Nebel”, “Sonne”, “weiter”, “zurück”, “leichter”, “schwerer”, …).
+
+## Real car models (optional)
+
+Out of the box the traffic uses simple cars built in code (hatchback, saloon, estate). It can drive real glTF models instead, which look far better; they aren't in the repository, as they are large (about 12 MB each) and come under their authors' own licences.
+
+1. On [Sketchfab](https://sketchfab.com), find cars marked *Downloadable*, licensed **CC Attribution** or **CC0** (not *NonCommercial*), with at most about 50,000 triangles. The series by [Daniel Zhabotinsky](https://sketchfab.com/DanielZhabotinsky) works well together: *Milano '95*, *Kiri '86*, *Sigil '07*, *Fairheaven SW '84*, *Shvan '92* (CC BY 4.0, made-up makes).
+2. Download each as **glTF** and unzip it into its own folder in `assets/cars/`, e.g. `assets/cars/milano_95_-_low_poly_model/scene.gltf` (with `scene.bin`, `textures/` and `license.txt`).
+3. List them in [`assets/cars/cars.json`](assets/cars/cars.json): the file, title, author, licence and source (all in each `license.txt`), the real car's `length` in metres, and `rotate` (degrees) if the model faces the wrong way. `cars.json` already lists the five above.
+
+The ride scales each model to its length, turns it lengthways and nose first, sets it on the road, and credits it at the bottom of the screen, as CC BY asks. Models listed but not downloaded are skipped; with none, the built-in cars drive. `tools/car-preview.html` shows the models side by side (`?view=front`, `?view=side`; `?built` for the built-in ones), with an arrow where the nose should point.
 
 ## Run it locally
 

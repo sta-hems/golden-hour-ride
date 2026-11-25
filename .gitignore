@@ -3,3 +3,5 @@ index.v*.html
 .DS_Store
 __pycache__/
 tools/.cache/
+# downloaded car models (see README, "Real car models"): kept out of the repository, only the list is shared
+assets/cars/*/

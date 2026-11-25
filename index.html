@@ -1077,7 +1077,7 @@ if (XMAS) {
     fol.setColorAt(i, col.setRGB(0.7 + rnd() * 0.3, 0.75 + rnd() * 0.25, 0.6 + rnd() * 0.3));
   });
   for (const m of [fol, trunk]) { m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; scene.add(m); }
-  Object.assign(seasonal, { fol, folMat, folBase: fol.instanceColor.array.slice(), pines: !real });
+  if (fol.instanceColor) Object.assign(seasonal, { fol, folMat, folBase: fol.instanceColor.array.slice(), pines: !real });   // (a course may have no trees at all)
 }
 
 if (xl.p.length) {         // every Christmas light is one glowing point; bright enough to bloom
