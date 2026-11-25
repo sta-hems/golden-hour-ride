@@ -1,8 +1,8 @@
 # Golden Hour Ride
 
-A proof-of-concept indoor cycling ride that runs in the browser (Three.js, one `index.html`).
+An indoor cycling ride that runs in the browser (Three.js, one `index.html`), with real roads in Germany built from the states' 1 m terrain survey and OpenStreetMap.
 
-Live: https://golden-hour-ride.space.fast/ · Leckhampton loop: https://golden-hour-ride.space.fast/?course=leckhampton
+This is a fork of [jamiemarsland/golden-hour-ride](https://github.com/jamiemarsland/golden-hour-ride) by Jamie Marsland, the original proof of concept with the invented valley, the Leckhampton loop and the Bluetooth trainer. This fork adds German courses and a route planner in the browser, towns and villages from OpenStreetMap, seasons, traffic, radio and news boards, and is set up to be ridden on a Daum ergobike through [ergoFACE](https://github.com/sta-hems/daumUSB2BLE), which offers the bike to the browser as a Bluetooth trainer (FTMS).
 
 ## What's in it
 
@@ -72,18 +72,36 @@ Then open http://localhost:8791/.
 
 - `index.html` – the whole ride.
 - `assets/` – textures and course data. `textures.js` is an embedded copy of the textures, used only when the page is opened straight from disk.
-- `tools/` – scripts that build the Leckhampton course data.
-- `deploy.sh` – publishes to Spacefast.
+- `js/` – the route planner and course builder, traffic, sound, radio, the small map and the menus.
+- `tools/` – scripts that build course data ahead of time: the Leckhampton course, and German courses (`build_course_de.py`); `car-preview.html` for the car models.
+- `serve.py` – the local server.
+- `deploy.sh` – from the original project, publishes it to Spacefast; not used by this fork.
 
 ## Credits
 
-- Textures: Poly Haven (CC0).
-- Terrain: Environment Agency LiDAR Composite DTM, Open Government Licence v3.0.
-- Roads, woodland and field boundaries: © OpenStreetMap contributors, ODbL.
-- 3D engine: Three.js (MIT), loaded from jsDelivr.
+The ride shows the sources of the course you are riding behind the small ⓘ note at the bottom right.
+
+- Original ride: [Golden Hour Ride](https://github.com/jamiemarsland/golden-hour-ride) by Jamie Marsland, MIT.
+- 3D engine: [Three.js](https://threejs.org) (MIT), loaded from jsDelivr.
+- Textures: [Poly Haven](https://polyhaven.com) (CC0).
+- Terrain, England: Environment Agency LiDAR Composite DTM, Open Government Licence v3.0.
+- Terrain, Germany: the states' digital terrain models (DGM1) through [hoehendaten.de](https://hoehendaten.de). Each state's own credit and licence come with its tiles and are shown in the ride, for example *Geobasisdaten © Hessische Verwaltung für Bodenmanagement und Geoinformation, dl-de/by-2-0*; most states publish under the [Datenlizenz Deutschland](https://www.govdata.de/lizenzen) (by-2.0 or zero-2.0).
+- Quick terrain while a route is being built: [Terrain Tiles on AWS Open Data](https://registry.opendata.aws/terrain-tiles/) (Mapzen/Tilezen; SRTM, national surveys and other sources).
+- Roads, bridges, buildings, woods, trees, hedges and place names: © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, ODbL, fetched through the public Overpass servers.
+- Place search: [Nominatim](https://nominatim.openstreetmap.org) (OpenStreetMap). Routing: [OSRM](https://project-osrm.org) on routing.openstreetmap.de (FOSSGIS).
+- News boards: headlines and links from [tagesschau.de](https://www.tagesschau.de), [hessenschau.de](https://www.hessenschau.de) and [BBC News](https://www.bbc.co.uk/news), fetched live; nothing of theirs is kept in the repository.
+- Radio: the live streams of BBC Radio 1–3, hr1–hr3, SWR1, SWR2 and SWR3, played as their stations offer them; not part of the repository.
+- Car models (optional, not in the repository): each model's author and licence (CC BY or CC0, from Sketchfab) are listed in `assets/cars/cars.json` and credited on screen while it drives.
 
 ## Licence
 
-The code is released under the MIT licence: see `LICENSE`. Use it, change it, build your own ride.
+The code is released under the MIT licence: see `LICENSE`. It keeps the copyright of the original project (Jamie Marsland) and adds that of the changes in this fork. Use it, change it, build your own ride.
 
-The MIT licence covers the code only. The course data in `assets/leckhampton.js` and `assets/leckhampton_osm.js` is derived from the sources credited above and stays under their terms: the Open Government Licence v3.0 for the terrain and the ODbL for the OpenStreetMap data. If you share or adapt that data, keep those credits.
+The MIT licence covers the code only. The data stays under the terms of its sources above:
+
+- `assets/leckhampton.js` and `assets/leckhampton_osm.js`: the Open Government Licence v3.0 for the terrain and the ODbL for the OpenStreetMap data.
+- `assets/idstein.js` and `assets/idstein_osm.js`: dl-de/by-2-0 for the Hessen terrain (Geobasisdaten © HVBG) and the ODbL for the OpenStreetMap data.
+- Courses you build yourself, with the route planner or `tools/build_course_de.py`: the same, for the states their terrain comes from.
+- The textures are CC0; the optional car models keep their authors' licences.
+
+If you share or adapt the data, keep those credits.
