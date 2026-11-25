@@ -44,6 +44,8 @@
     background: rgba(20,16,12,.55); border: 1px solid rgba(255,255,255,.3); backdrop-filter: blur(6px); display: flex; gap: 8px; align-items: center; }
   #refine button { font: inherit; color: #fff; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.4); border-radius: 999px; padding: 3px 10px; cursor: pointer; }
   #refine button.go { background: #c98a3b; border-color: #e7b06a; }
+  #refine.quiet { opacity: .55; font-size: 10px; padding: 4px 10px; } #refine.quiet:hover { opacity: 1; }
+  #refine.quiet button.go { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.4); }
   body.clean { cursor: none; }
   /* sources and licences: a small note in the corner that opens on a click */
   #creditbox { position: fixed; right: 14px; bottom: 10px; font-size: 10px; letter-spacing: .04em; text-align: right; z-index: 5; }
@@ -2140,9 +2142,13 @@ const frameHooks = [];
 }
 
 /* ---------- a route planned in a hurry: its survey heights are built while you ride ---------- */
-if (COURSE_INFO.mine && (COURSE_INFO.quality === 'quick' || COURSE_INFO.quality === 'nomap')) {
+// Only map details missing (an older builder laid it out, or the map server failed last time): that goes on quietly
+// and the next ride has them; nothing to restart for. After a failed try it waits half an hour before asking again.
+const MAP_TRIED = 'golden-hour-ride-maptried-' + COURSE, mapOnly = COURSE_INFO.quality === 'nomap';
+if (COURSE_INFO.mine && (COURSE_INFO.quality === 'quick' || (mapOnly && Date.now() - (+localStorage.getItem(MAP_TRIED) || 0) > 30 * 60e3))) {
   const what = COURSE_INFO.quality === 'quick' ? 'Survey heights' : 'Map details';
-  const chip = document.createElement('div'); chip.id = 'refine'; document.body.append(chip);
+  const chip = document.createElement('div'); chip.id = 'refine'; chip.classList.toggle('quiet', mapOnly); document.body.append(chip);
+  const failed = () => { if (mapOnly) { localStorage.setItem(MAP_TRIED, Date.now()); setTimeout(() => chip.remove(), 8000); } };
   chip.textContent = what + ': starting…';
   chip.title = 'This route was built from quick terrain tiles so you could set off. The 1 m state survey is loading in the background.';
   const w = new Worker(new URL('./js/refine-worker.js', location.href), { type: 'module' });
@@ -2150,15 +2156,18 @@ if (COURSE_INFO.mine && (COURSE_INFO.quality === 'quick' || COURSE_INFO.quality 
     const m = e.data;
     if (m.total) chip.textContent = `${what}: ${m.tile} of ${m.total} squares`;
     else if (m.log && /^(Map|Shaping|Placing)/.test(m.log)) chip.textContent = what + ': ' + m.log.replace(/…$/, '').toLowerCase() + '…';
-    else if (m.error) chip.textContent = what + ' failed: ' + m.error + ' (tried again next ride)';
+    else if (m.error) { chip.textContent = what + ' failed: ' + m.error + ' (tried again later)'; failed(); }
     else if (m.done) {
       w.terminate();
       if (m.already) { chip.remove(); return; }
+      if (m.quality !== 'nomap') localStorage.removeItem(MAP_TRIED);
       const parts = [COURSE_INFO.quality === 'quick' && 'survey heights', m.quality !== 'nomap' && 'map details'].filter(Boolean);
-      if (!parts.length) { chip.textContent = 'Map details: the map server is busy, tried again next ride'; setTimeout(() => chip.remove(), 12000); return; }
-      chip.innerHTML = `<span>${parts.join(' and ').replace(/^./, c => c.toUpperCase())} ready${m.quality === 'nomap' ? ' (map details next ride)' : ''}</span><button class="go">Switch now</button><button>Later</button>`;
+      if (!parts.length) { chip.textContent = 'Map details: the map server is busy, tried again later'; failed(); setTimeout(() => chip.remove(), 12000); return; }
+      chip.innerHTML = mapOnly ? '<span>Map details saved: the next ride shows them</span><button class="go">Switch now</button><button>OK</button>'
+        : `<span>${parts.join(' and ').replace(/^./, c => c.toUpperCase())} ready${m.quality === 'nomap' ? ' (map details next ride)' : ''}</span><button class="go">Switch now</button><button>Later</button>`;
       const [go, later] = chip.querySelectorAll('button');
       later.onclick = () => chip.remove();     // the next ride uses them anyway
+      if (mapOnly) setTimeout(() => chip.remove(), 20000);
       go.onclick = () => {
         sessionStorage.setItem(RESUME_KEY, JSON.stringify({ course: COURSE, t: Date.now(), s: st.s, v: st.v, dist: st.dist, target: st.target, trainer: st.trainer,
           logT: st.logRide.t, secs: st.logRide.s }));
@@ -2172,6 +2181,7 @@ if (COURSE_INFO.mine && (COURSE_INFO.quality === 'quick' || COURSE_INFO.quality 
     if (!why) why = await import('./js/builder.js').then(() => import('./js/store.js')).then(() => '', err => err.message);
     console.warn('refine worker:', e, why);
     chip.textContent = what + ' could not start (' + (why || 'worker error, see the console') + ') – tried again next ride';
+    failed();
   };
   w.postMessage({ id: COURSE });
 }
