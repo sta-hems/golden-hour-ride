@@ -1,5 +1,5 @@
 {
- "about": "Traffic models for js/traffic.js. length: the real car's length in metres (the model is scaled to it); rotate: degrees to turn it nose-first (these Sketchfab models face backwards, hence 180). All by Daniel Zhabotinsky, CC BY 4.0 (each folder's license.txt).",
+ "about": "Traffic models for js/traffic.js. Each is shown at its own size (these are modelled in metres); add \"length\" (metres) to scale one. rotate: degrees to turn it nose-first (these Sketchfab models face backwards, hence 180). All by Daniel Zhabotinsky, CC BY 4.0 (each folder's license.txt).",
  "cars": [
   {
    "file": "milano_95_-_low_poly_model/scene.gltf",
@@ -7,7 +7,6 @@
    "author": "Daniel Zhabotinsky",
    "license": "CC BY 4.0",
    "url": "https://sketchfab.com/3d-models/milano-95-low-poly-model-122a22d210234596ad23623588d0d166",
-   "length": 3.9,
    "rotate": 180
   },
   {
@@ -16,7 +15,6 @@
    "author": "Daniel Zhabotinsky",
    "license": "CC BY 4.0",
    "url": "https://sketchfab.com/3d-models/kiri-86-low-poly-model-5c17c582ef9549798f694b660feea42a",
-   "length": 4.2,
    "rotate": 180
   },
   {
@@ -25,7 +23,6 @@
    "author": "Daniel Zhabotinsky",
    "license": "CC BY 4.0",
    "url": "https://sketchfab.com/3d-models/sigil-07-low-poly-model-22abe5284d4c4b55920b8462eb24a8c1",
-   "length": 4.6,
    "rotate": 180
   },
   {
@@ -34,7 +31,6 @@
    "author": "Daniel Zhabotinsky",
    "license": "CC BY 4.0",
    "url": "https://sketchfab.com/3d-models/fairheaven-sw-84-low-poly-model-aa0becb6e854422596cac6b21bf79787",
-   "length": 4.8,
    "rotate": 180
   },
   {
@@ -43,7 +39,54 @@
    "author": "Daniel Zhabotinsky",
    "license": "CC BY 4.0",
    "url": "https://sketchfab.com/3d-models/shvan-92-low-poly-model-09d718c9cf72401b8534d265a06a803f",
-   "length": 4.8,
+   "rotate": 180
+  },
+  {
+   "file": "bokaroo_67_-_low_poly_model/scene.gltf",
+   "title": "Bokaroo '67",
+   "author": "Daniel Zhabotinsky",
+   "license": "CC BY 4.0",
+   "url": "https://sketchfab.com/3d-models/bokaroo-67-low-poly-model-22015d1863d6455aa31cfd738b972c50",
+   "rotate": 180
+  },
+  {
+   "file": "lasley_67_-_low_poly_model/scene.gltf",
+   "title": "Lasley '67",
+   "author": "Daniel Zhabotinsky",
+   "license": "CC BY 4.0",
+   "url": "https://sketchfab.com/3d-models/lasley-67-low-poly-model-1269720ec7b84c899eac77c1d325141e",
+   "rotate": 180
+  },
+  {
+   "file": "lct_3000_07-_low_poly_model/scene.gltf",
+   "title": "LCT 3000 '07",
+   "author": "Daniel Zhabotinsky",
+   "license": "CC BY 4.0",
+   "url": "https://sketchfab.com/3d-models/lct-3000-07-low-poly-model-3be03b6a43aa41898c9ca806b8787052",
+   "rotate": 180
+  },
+  {
+   "file": "lct_3000_95_-_low_poly_model/scene.gltf",
+   "title": "LCT 3000 '95",
+   "author": "Daniel Zhabotinsky",
+   "license": "CC BY 4.0",
+   "url": "https://sketchfab.com/3d-models/lct-3000-95-low-poly-model-663a0953c038434a918cb85725c88ffa",
+   "rotate": 180
+  },
+  {
+   "file": "lightbody_lifted_85_-_low_poly_model/scene.gltf",
+   "title": "Lightbody Lifted '85",
+   "author": "Daniel Zhabotinsky",
+   "license": "CC BY 4.0",
+   "url": "https://sketchfab.com/3d-models/lightbody-lifted-85-low-poly-model-67beae18c3d24be68f9c8f0ec382d8e3",
+   "rotate": 180
+  },
+  {
+   "file": "tiara_gt_83_tuned_-_low_poly_model/scene.gltf",
+   "title": "Tiara GT '83 Tuned",
+   "author": "Daniel Zhabotinsky",
+   "license": "CC BY 4.0",
+   "url": "https://sketchfab.com/3d-models/tiara-gt-83-tuned-low-poly-model-59a0eaaa2af144b2956957e7032d0221",
    "rotate": 180
   }
  ]

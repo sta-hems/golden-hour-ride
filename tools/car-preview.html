@@ -21,7 +21,7 @@ const models = new URLSearchParams(location.search).has('built') ? [] : await im
 if (models.length) {
   models.forEach(({ model }, n) => { model.position.set((n - (models.length - 1) / 2) * 2.6, 0, (n % 2) * 1.2); scene.add(model);
     scene.add(new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(model.position.x, 2.2, model.position.z), 1.6, 0x2266ff)); });
-  cam.position.multiplyScalar(1.5); cam.lookAt(0, 0.7, 0);
+  cam.position.multiplyScalar(0.9 + models.length * 0.22); cam.lookAt(0, 0.7, 0);     // further back for more cars
   const loop = () => { r.render(scene, cam); requestAnimationFrame(loop); }; loop();
 } else
 Object.keys(STYLES).forEach((k, n) => {

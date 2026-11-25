@@ -36,7 +36,9 @@ function fit(scene, c) {
   scene.rotation.y = (c.rotate || 0) * Math.PI / 180;
   scene.updateMatrixWorld(true); measure(scene, box).getSize(size);
   if (size.x > size.z) { scene.rotation.y += Math.PI / 2; scene.updateMatrixWorld(true); measure(scene, box).getSize(size); }   // lying across: turn it lengthways first, then by rotate
-  scene.scale.multiplyScalar((c.length || 4.4) / size.z);
+  c.native = size.z;                                       // the model's own length, for checking
+  const own = size.z > 2.5 && size.z < 8 ? size.z : 4.4;   // no length given: keep the model's own size if it looks like metres
+  scene.scale.multiplyScalar((c.length || own) / size.z);
   scene.updateMatrixWorld(true); measure(scene, box).getCenter(mid);
   scene.position.set(-mid.x, -box.min.y, -mid.z);                       // centred, wheels on the ground
   scene.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
@@ -66,7 +68,8 @@ function carVoice(ac) {
   const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 600; bp.Q.value = 0.5;
   const tyre = ac.createGain(); tyre.gain.value = 0; n.connect(bp).connect(tyre).connect(out);
   const t = ac.currentTime; o1.start(t); o2.start(t); lfo.start(t); n.start(t, Math.random() * 1.9);
-  return { out, pan, o1, o2, bp, hum, tyre, d: null };
+  const stop = () => { for (const o of [o1, o2, lfo, n]) try { o.stop(); } catch {} out.disconnect(); };
+  return { out, pan, o1, o2, bp, hum, tyre, d: null, stop };
 }
 
 const KEY = 'golden-hour-ride-traffic';
@@ -160,17 +163,40 @@ export function init(ctx) {
   label();
 
   const styles = Object.fromEntries(Object.entries(STYLES).map(([k, s]) => [k, buildStyle(s)]));
-  const mats = materials();
-  // a few cars, about one for every 1.5 km of road: most come towards you, some go your way and overtake
-  const COUNT = Math.max(2, Math.min(6, Math.round(LEN / 1500))), kinds = Object.keys(styles), cars = [];
-  for (let n = 0; n < COUNT; n++) {
-    const parts = styles[kinds[n % kinds.length]], car = new THREE.Group();
+  const mats = materials(), kinds = Object.keys(styles), cars = [];
+  let models = [], serial = 0;
+  const dress = (c, n) => {                              // the car's body: a real model if there are any, otherwise a built one
+    c.car.clear();
+    if (models.length) { c.car.add(models[n % models.length].model.clone(true)); return; }
     const paint = new THREE.MeshPhysicalMaterial({ color: PAINTS[Math.floor(rnd() * PAINTS.length)], metalness: 0.55, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.08 });
-    for (const [k, g] of Object.entries(parts)) { const m = new THREE.Mesh(g, k === 'body' ? paint : mats[k]); m.castShadow = true; m.receiveShadow = k === 'body'; car.add(m); }
-    group.add(car);
-    const dir = n % 5 === 1 || n % 5 === 3 ? 1 : -1;                       // +1: your way, -1: towards you
-    cars.push({ car, dir, s: ((n + 0.3 + rnd() * 0.4) / COUNT * LEN + (dir < 0 ? 600 : -500) + LEN) % LEN, v: 12, want: 17 + rnd() * 6, lat: dir * LANE, latV: 0, passing: false });
-  }
+    for (const [k, g] of Object.entries(styles[kinds[n % kinds.length]])) { const m = new THREE.Mesh(g, k === 'body' ? paint : mats[k]); m.castShadow = true; m.receiveShadow = k === 'body'; c.car.add(m); }
+  };
+  const makeCar = s => {
+    const n = serial++, dir = n % 5 === 1 || n % 5 === 3 ? 1 : -1;      // +1: your way, -1: towards you
+    const c = { car: new THREE.Group(), n, dir, s, v: 12, want: 17 + rnd() * 6, lat: dir * LANE, latV: 0, passing: false };
+    dress(c, n); group.add(c.car);
+    return c;
+  };
+  // how busy the road is: cars per km, from the slider under the Traffic button (about one every 1.5 km to start with)
+  const DENS_KEY = KEY + '-density', STEPS = [0.15, 0.25, 0.4, 0.55, 0.67, 0.85, 1.1, 1.4, 1.8, 2.4, 3.2];
+  let step = Math.max(0, Math.min(STEPS.length - 1, +(localStorage.getItem(DENS_KEY) ?? 4)));
+  const target = () => Math.max(1, Math.min(45, Math.round(LEN / 1000 * STEPS[step])));
+  const setCount = k => {
+    while (cars.length < k) {                            // a newcomer appears well away from the rider, in the biggest gap
+      let best = (ctx.st.s + LEN / 2) % LEN, bestGap = -1;
+      for (let t = 0; t < 16; t++) {
+        const s = (ctx.st.s + 300 + rnd() * Math.max(1, LEN - 600)) % LEN;
+        const g = cars.length ? Math.min(...cars.map(o => Math.min(fwd(o.s, s), fwd(s, o.s)))) : 1e9;
+        if (g > bestGap) { bestGap = g; best = s; }
+      }
+      cars.push(makeCar(best));
+    }
+    while (cars.length > k) {                            // and the one furthest from the rider leaves first
+      let far = 0, fd = -1;
+      cars.forEach((c, i) => { const d = Math.min(fwd(c.s, ctx.st.s), fwd(ctx.st.s, c.s)); if (d > fd) { fd = d; far = i; } });
+      const [c] = cars.splice(far, 1); group.remove(c.car); if (c.voice) c.voice.stop();
+    }
+  };
 
   // how fast the road can be taken at each point: at most 2 m/s² sideways in a bend, and braking at 2.5 m/s² beforehand
   const DS = LEN / N, LAT = 2.0, BRAKE = 2.5, bend = new Float32Array(N);
@@ -191,17 +217,50 @@ export function init(ctx) {
   const idx = s => Math.floor(((s % LEN) + LEN) % LEN / DS) % N;
   const fwd = (a, b) => (((b - a) % LEN) + LEN) % LEN;                    // how far b is ahead of a, along the ride
 
+  setCount(target());
   ctx.st.cars = cars;                                    // for checking
-  loadModels().then(models => {                          // swap in the real models once they have loaded
-    if (!models.length) return;
-    cars.forEach((c, n) => { const m = models[n % models.length].model.clone(true); c.car.clear(); c.car.add(m); });
-    const credit = ctx.$('credit'), names = models.map(({ info: i }) => `${i.title}${i.author ? ' by ' + i.author : ''}${i.license ? ' (' + i.license + ')' : ''}`);
+  loadModels().then(found => {                           // swap in the real models once they have loaded
+    if (!found.length) return;
+    models = found; cars.forEach(c => dress(c, c.n));
+    const models_ = models;
+    const credit = ctx.$('credit'), names = models_.map(({ info: i }) => `${i.title}${i.author ? ' by ' + i.author : ''}${i.license ? ' (' + i.license + ')' : ''}`);
     if (credit) credit.textContent += ' Cars: ' + names.join(', ') + '.';
   });
   const pose = mkPose(), front = mkPose(), aim = new THREE.Vector3(), rel = new THREE.Vector3();
   const hush = () => { for (const c of cars) if (c.voice) c.voice.out.gain.setTargetAtTime(0, c.voice.out.context.currentTime, 0.1); };
   btn.addEventListener('click', () => { if (!on) hush(); });
-  btn.title = 'A few cars, both ways; they give the rider plenty of room';
+  btn.title = 'A few cars, both ways; they give the rider plenty of room. Point at the button to set how busy the road is';
+  // the slider for how busy the road is: shown while the pointer is over the button (traffic on), gone again once set
+  const pop = document.createElement('div'); pop.id = 'trafficpop'; pop.hidden = true;
+  pop.innerHTML = `<label>Traffic <input type="range" min="0" max="${STEPS.length - 1}" step="1"></label><span></span>`;
+  if (!document.getElementById('trafficpop-css')) {
+    const css = document.createElement('style'); css.id = 'trafficpop-css';
+    css.textContent = `#trafficpop { position: fixed; z-index: 6; padding: 9px 12px; border-radius: 12px; font-size: 11px; letter-spacing: .06em; color: #fff;
+      background: rgba(20,16,12,.8); border: 1px solid rgba(255,255,255,.3); backdrop-filter: blur(8px); display: flex; gap: 10px; align-items: center; }
+      #trafficpop[hidden] { display: none; } #trafficpop label { display: flex; gap: 8px; align-items: center; }
+      #trafficpop input { width: 130px; accent-color: #ffcf8f; } #trafficpop span { min-width: 92px; opacity: .8; font-variant-numeric: tabular-nums; }
+      body.clean #trafficpop { display: none; }`;
+    document.head.append(css);
+  }
+  document.body.append(pop);
+  const range = pop.querySelector('input'), out = pop.querySelector('span');
+  const say = () => { const k = target(); out.textContent = `${k} car${k > 1 ? 's' : ''} · ${STEPS[step] < 1 ? 'one every ' + (1 / STEPS[step]).toFixed(1) + ' km' : STEPS[step].toFixed(1) + ' per km'}`; };
+  let hideT = 0;
+  const show = () => {
+    if (!on) return;
+    clearTimeout(hideT);
+    const r = btn.getBoundingClientRect();
+    pop.hidden = false; range.value = step; say();
+    pop.style.top = (r.bottom + 6) + 'px'; pop.style.left = Math.max(8, Math.min(innerWidth - pop.offsetWidth - 8, r.left + r.width / 2 - pop.offsetWidth / 2)) + 'px';
+  };
+  const hideSoon = ms => { clearTimeout(hideT); hideT = setTimeout(() => { if (!pop.matches(':hover') && !btn.matches(':hover')) pop.hidden = true; else hideSoon(400); }, ms); };
+  btn.addEventListener('mouseenter', show);
+  btn.addEventListener('mouseleave', () => hideSoon(500));
+  pop.addEventListener('mouseenter', () => clearTimeout(hideT));
+  pop.addEventListener('mouseleave', () => hideSoon(500));
+  range.addEventListener('input', () => { step = +range.value; setCount(target()); say(); });
+  range.addEventListener('change', () => { localStorage.setItem(DENS_KEY, step); clearTimeout(hideT); hideT = setTimeout(() => { pop.hidden = true; }, 1200); });   // set: off it goes
+  btn.addEventListener('click', () => { if (!on) pop.hidden = true; else show(); });
   return dt => {
     if (!on) return;
     const ac = ctx.audio(), vol = level('traffic'), me = ctx.st;
