@@ -261,7 +261,7 @@ export function init(ctx) {
   range.addEventListener('input', () => { step = +range.value; setCount(target()); say(); });
   range.addEventListener('change', () => { localStorage.setItem(DENS_KEY, step); clearTimeout(hideT); hideT = setTimeout(() => { pop.hidden = true; }, 1200); });   // set: off it goes
   btn.addEventListener('click', () => { if (!on) pop.hidden = true; else show(); });
-  return dt => {
+  const frame = dt => {
     if (!on) return;
     const ac = ctx.audio(), vol = level('traffic'), me = ctx.st;
     for (const c of cars) {
@@ -276,20 +276,20 @@ export function init(ctx) {
         if (past < 30) want = Math.max(want, me.v + 3);                 // just ahead of a fast rider (downhill): keep pulling away
         if (gap < 6 || past < 6) c.passing = true;                       // never sit on top of the rider: take the other lane
         if (c.passing && past > 20 && past < LEN / 2) c.passing = false;     // well clear in front: back to the right lane
-        if (!c.passing && gap < 70) {
+        if (!c.passing && gap < 90) {
           // overtake only with the other lane clear for 320 m and no tight bend coming
           let clear = true;
           for (const o of cars) if (o.dir < 0 && fwd(c.s, o.s) < 320) clear = false;
           for (let d = 0; d < 160 && clear; d += 10) if (bend[idx(c.s + d)] < 15) clear = false;
-          if (clear && c.v > me.v + 1) c.passing = true;
-          else if (gap < 45) want = Math.min(want, me.v + (gap - 25) * 0.25);   // otherwise wait behind, well back
+          if (clear && c.v > me.v + 1 && gap < 70) c.passing = true;
+          else if (!clear) want = Math.min(want, me.v + Math.max(0, gap - 25) * 0.3);   // otherwise ease off early and wait well back, about 25 m
         }
       }
       want = Math.max(0, want);
       c.v += Math.max(-4 * dt, Math.min(2 * dt, want - c.v));
       c.s = ((c.s + c.dir * c.v * dt) % LEN + LEN) % LEN;
       // the lane: your side for cars going your way, the other side for oncoming ones and for overtaking
-      const lane = c.dir > 0 && !c.passing ? LANE : -LANE;
+      const lane = c.dir > 0 && !c.passing ? LANE : c.passing ? -LANE - Math.sign(LANE) * 0.4 : -LANE;   // overtaking: a little beyond the middle of the other lane, for room
       // a critically damped spring: the car eases out, drifts across and eases in again, a smooth S without a kink at either end
       const K = 0.9, h = Math.min(dt, 0.05);
       c.latV += (K * (lane - c.lat) - 2 * Math.sqrt(K) * c.latV) * h;
@@ -312,4 +312,6 @@ export function init(ctx) {
       v.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, rel.x / (Math.abs(rel.z) + 4))), now, 0.06);
     }
   };
+  ctx.st.trafficStep = frame;                           // for checking: one step of the traffic
+  return frame;
 }
